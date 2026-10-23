@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import QuartzCore
 import XiwoCore
 
 /// The drawing surface used by both the editor and the presenter.
@@ -20,6 +21,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     /// Called for keys the canvas does not handle itself.
     var onKey: ((NSEvent) -> Bool)?
     var onPlayMedia: ((BoardElement) -> Void)?
+    /// Benchmark hook: the rect each draw covered and how long it took, in seconds.
+    var drawObserver: ((NSRect, Double) -> Void)?
 
     private var cancellables: Set<AnyCancellable> = []
     private var cache: (image: CGImage, key: CacheKey)?
@@ -133,6 +136,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let started = drawObserver == nil ? 0 : CACurrentMediaTime()
+        defer { drawObserver?(dirtyRect, CACurrentMediaTime() - started) }
         ctx.setFillColor((mode == .edit ? NSColor.underPageBackgroundColor : NSColor.black).cgColor)
         ctx.fill(bounds)
         let r = slideRect

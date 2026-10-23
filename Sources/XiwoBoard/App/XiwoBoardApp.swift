@@ -21,7 +21,7 @@ struct XiwoBoardApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if MainActor.assumeIsolated({ Snapshotter.runIfRequested() }) { return }
+        if MainActor.assumeIsolated({ Snapshotter.runIfRequested() || InkBenchmark.runIfRequested() }) { return }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         Task { @MainActor in
