@@ -38,6 +38,8 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     private var flyoutClosedAt: (Flyout, Date)?
     private var mouseMonitor: Any?
     private var startSnapshot: Courseware
+    private let startUnsaved: Bool
+    private let startSaveCount: Int
     private var lastIndex: Int
     private var cancellables: Set<AnyCancellable> = []
     private var savedTool: Tool
@@ -48,6 +50,8 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         self.tools = tools
         self.recorder = recorder
         self.startSnapshot = document.courseware
+        self.startUnsaved = document.isDirty
+        self.startSaveCount = document.saveCount
         self.lastIndex = document.currentIndex
         self.savedTool = tools.tool
         super.init()
@@ -366,8 +370,9 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
             a.addButton(withTitle: "保留")
             a.addButton(withTitle: "不保留")
             if a.runModal() == .alertSecondButtonReturn {
-                let snap = startSnapshot
-                document.edit { $0 = snap }
+                // Back to the document as it was, saved or not; saving during the lecture
+                // put the board writing on disk, so then going back is a change to save.
+                document.restore(startSnapshot, unsaved: startUnsaved || document.saveCount != startSaveCount)
             }
         }
         tools.tool = savedTool == .laser || savedTool == .spotlight || savedTool == .magnifier ? .select : savedTool
@@ -504,8 +509,8 @@ struct PresentationToolbar: View {
     private var sep: some View { Divider().frame(height: 32).padding(.horizontal, 2) }
 
     private func flyoutButton(_ kind: PresentationController.Flyout, title: String, systemImage: String, active: Bool,
-                              action: @escaping () -> Void) -> some View {
-        RibbonButton(title: title, systemImage: systemImage, active: active || presenter.flyout == kind, action: action)
+                              label: String? = nil, action: @escaping () -> Void) -> some View {
+        RibbonButton(title: title, systemImage: systemImage, active: active || presenter.flyout == kind, label: label, action: action)
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlyoutAnchorKey.self, value: [kind: g.frame(in: .named(Self.space))])
             })
@@ -523,7 +528,8 @@ struct PresentationToolbar: View {
         case .stopping: title = "保存中"
         }
         return flyoutButton(.record, title: title, systemImage: recorder.isRecording ? "stop.circle.fill" : "record.circle",
-                            active: recorder.isRecording) {
+                            active: recorder.isRecording,
+                            label: recorder.isRecording ? "停止录制，已录 \(title)" : title) {
             switch recorder.state {
             case .idle: presenter.toggleFlyout(.record)
             case .recording, .paused: presenter.toggleRecording()

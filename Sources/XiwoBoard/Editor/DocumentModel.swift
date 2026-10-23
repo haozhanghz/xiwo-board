@@ -15,6 +15,9 @@ final class DocumentModel: ObservableObject {
     }
     @Published var selection: Set<String> = []
     @Published private(set) var isDirty = false
+    /// Counts saves to the document's own file, so a caller can tell whether the file
+    /// changed since it last looked.
+    private(set) var saveCount = 0
     @Published var fileURL: URL?
     /// Bumps on every content change so views holding caches can refresh.
     @Published private(set) var revision = 0
@@ -72,6 +75,13 @@ final class DocumentModel: ObservableObject {
 
     /// Records the undo point for a continuous gesture (drag, erase) before it begins.
     func beginGesture() { pushUndo() }
+
+    /// Puts the whole document back as `snapshot`, as one step that can be undone.
+    /// `unsaved` says whether that leaves changes the file on disk does not have.
+    func restore(_ snapshot: Courseware, unsaved: Bool) {
+        edit { $0 = snapshot }
+        isDirty = unsaved
+    }
 
     private func pushUndo() {
         undoStack.append(Snapshot(courseware: courseware, index: currentIndex))
@@ -225,7 +235,8 @@ final class DocumentModel: ObservableObject {
         editSlide { s in
             var out: [BoardElement] = []
             for e in s.elements {
-                if ids.contains(e.id), case .group(let kids) = e.content {
+                if ids.contains(e.id), case .group = e.content {
+                    let kids = e.ungrouped()
                     out.append(contentsOf: kids); kids.forEach { newSel.insert($0.id) }
                 } else { out.append(e) }
             }
@@ -309,9 +320,9 @@ final class DocumentModel: ObservableObject {
     func insertText(_ text: String = "", at p: CGPoint, spec: TextSpec? = nil) {
         var t = spec ?? TextSpec(text: text)
         t.text = text
-        let width = 420.0
-        let h = SlideRenderer.textHeight(t, width: width - 12) + 8
-        insert(BoardElement(frame: CGRect(x: p.x, y: p.y, width: width, height: h), content: .text(t)))
+        var e = BoardElement(frame: CGRect(x: p.x, y: p.y, width: 420, height: 0), content: .text(t))
+        e.growToFitText()
+        insert(e)
     }
 
     func insertImage(data: Data, name: String, ext: String, pixelSize: CGSize) {
@@ -370,6 +381,7 @@ final class DocumentModel: ObservableObject {
         if url.pathExtension.lowercased() == CoursewareArchive.fileExtension {
             fileURL = url
             isDirty = false
+            saveCount += 1
         }
         RecentFiles.add(url)
     }

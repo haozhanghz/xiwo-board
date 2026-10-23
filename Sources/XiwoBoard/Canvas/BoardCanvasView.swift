@@ -37,7 +37,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private enum Drag {
         case none
         case drawing
-        case erasing(hasUndo: Bool)
+        /// `last` is where the eraser was at the previous sample.
+        case erasing(hasUndo: Bool, last: CGPoint)
         case moving(last: CGPoint, moved: Bool)
         case resizing(handle: Handle, original: BoardElement, start: CGPoint)
         case rotating(original: BoardElement)
@@ -369,8 +370,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             setNeedsDisplay(liveInkDirtyRect())
             return
         case .eraser:
-            drag = .erasing(hasUndo: false)
-            erase(at: p)
+            drag = .erasing(hasUndo: false, last: p)
+            erase(to: p)
         case .laser:
             drag = .laser
             recordLaser()
@@ -467,7 +468,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             lastDragTime = event.timestamp
             return
         case .erasing:
-            erase(at: p)
+            erase(to: p)
         case .laser:
             recordLaser()
         case .creatingShape(let t, let a, _):
@@ -549,8 +550,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             if editingID != nil { endEditing() }
             let p = toSlide(convert(event.locationInWindow, from: nil))
             pointer = p
-            drag = .erasing(hasUndo: false)
-            erase(at: p)
+            drag = .erasing(hasUndo: false, last: p)
+            erase(to: p)
             needsDisplay = true
             return
         }
@@ -564,7 +565,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         guard case .erasing = drag else { return super.rightMouseDragged(with: event) }
         let p = toSlide(convert(event.locationInWindow, from: nil))
         pointer = p
-        erase(at: p)
+        erase(to: p)
         needsDisplay = true
     }
 
@@ -705,39 +706,45 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             guard let i = s.elements.firstIndex(where: { $0.id == original.id }) else { return }
             var e = original
             e.setFrame(f)
-            if case .text(let t) = e.content, !corner || !keepAspect {
-                // Side handles re-wrap text; keep the box tall enough.
-                e.frame.size.height = max(f.height, SlideRenderer.textHeight(t, width: f.width - 12) + 8)
-            }
+            // Text re-wraps to the new width: keep every line inside the box. Dragging a
+            // side keeps a box that fitted its text fitting it.
+            if handle == .left || handle == .right { e.refitText(was: original) } else { e.growToFitText() }
             s.elements[i] = e
         }
     }
 
-    private func erase(at p: CGPoint) {
+    /// Erases along the eraser's path since the previous sample, so a quick swipe leaves
+    /// nothing between samples. The whole gesture is one step to undo.
+    private func erase(to p: CGPoint) {
+        guard case .erasing(var hasUndo, let last) = drag else { return }
         let r = tools.eraserSize / 2
         let mode = tools.eraserMode
         let present = self.mode == .present
         var reveal: [String] = []
         var out: [BoardElement] = []
-        let original = document.slide.elements
-        for e in original {
+        var changed = false
+        for e in document.slide.elements {
             guard e.isStroke && !e.locked else {
-                if present, e.masked, e.hitTest(p, tolerance: r) { reveal.append(e.id) }
+                if present, e.masked, e.hitTest(from: last, to: p, tolerance: r) { reveal.append(e.id) }
                 out.append(e); continue
             }
             if mode == .stroke {
-                if !e.hitTest(p, tolerance: r) { out.append(e) }
+                if e.hitTest(from: last, to: p, tolerance: r) { changed = true } else { out.append(e) }
             } else {
-                out.append(contentsOf: e.erasing(center: p, radius: r))
+                let left = e.erasing(from: last, to: p, radius: r)
+                // Untouched ink comes back as itself; erased pieces get new ids.
+                if left.count != 1 || left[0].id != e.id { changed = true }
+                out.append(contentsOf: left)
             }
         }
-        if out != original {
-            if case .erasing(let hasUndo) = drag, !hasUndo {
+        if changed {
+            if !hasUndo {
                 document.beginGesture()
-                drag = .erasing(hasUndo: true)
+                hasUndo = true
             }
             document.editSlideLive { $0.elements = out }
         }
+        drag = .erasing(hasUndo: hasUndo, last: p)
         if !reveal.isEmpty, !Set(reveal).isSubset(of: revealedMasks) { revealedMasks.formUnion(reveal) }
     }
 
@@ -831,8 +838,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
                 document.editSlide { $0.elements.removeAll { $0.id == id } }
             } else if text != t.text {
                 t.text = text
-                let h = SlideRenderer.textHeight(t, width: e.frame.width - 12) + 8
-                document.update(id) { $0.content = .text(t); $0.frame.size.height = max(h, 20) }
+                document.update(id) { $0.content = .text(t); $0.refitText(was: e) }
             }
         case .shape(var s):
             if (s.text ?? "") != text {

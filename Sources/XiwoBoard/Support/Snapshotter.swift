@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import SwiftUI
 import XiwoCore
@@ -62,6 +63,12 @@ enum Snapshotter {
                to: dir.appendingPathComponent("shapes.png"))
         render(PenSettings().environmentObject(app.tools).padding(14).background(Color(nsColor: .windowBackgroundColor)), size: nil,
                to: dir.appendingPathComponent("pen-settings.png"))
+        render(TablePicker { _, _ in }.padding(12).background(Color(nsColor: .windowBackgroundColor)), size: nil,
+               to: dir.appendingPathComponent("table-picker.png"))
+        // An audio object at its default size, in a canvas about as large as the editor's.
+        let bar = AudioPlayerBar(player: AVPlayer(), name: "示例音频")
+        bar.place(over: NSRect(x: 230, y: 150, width: 140, height: 90), in: NSRect(x: 0, y: 0, width: 600, height: 400))
+        render(bar, to: dir.appendingPathComponent("audio-player.png"))
 
         for (i, s) in doc.courseware.slides.enumerated() {
             if let img = SlideRenderer.image(of: s, courseware: doc.courseware, pixelWidth: 1280),
@@ -72,6 +79,19 @@ enum Snapshotter {
         try? SlideRenderer.pdf(of: doc.courseware).write(to: dir.appendingPathComponent("sample.pdf"))
         try? CoursewareArchive.encode(doc.courseware).write(to: dir.appendingPathComponent("示例课件.xwb"))
         try? EnbxExporter.encode(doc.courseware).write(to: dir.appendingPathComponent("示例课件.enbx"))
+    }
+
+    static func render(_ view: NSView, to url: URL) {
+        let window = NSWindow(contentRect: view.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+        let host = NSView(frame: view.bounds)
+        view.frame.origin = .zero
+        host.addSubview(view)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     static func render<V: View>(_ view: V, size: CGSize?, to url: URL) {

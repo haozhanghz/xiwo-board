@@ -42,7 +42,7 @@ struct PageInspector: View {
         let bg = doc.slide.background
         InspectorSection(title: "页面背景") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
-                ForEach(Array(SlideBackground.presets.enumerated()), id: \.offset) { _, preset in
+                ForEach(SlideBackground.presets, id: \.name) { name, preset in
                     Button { doc.editSlide { $0.background = preset } } label: {
                         SlidePreview(slide: Slide(background: preset), courseware: doc.courseware, pixelWidth: 120)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -50,6 +50,9 @@ struct PageInspector: View {
                                                                               lineWidth: bg == preset ? 2 : 1))
                     }
                     .buttonStyle(.plain)
+                    .help(name)
+                    .accessibilityLabel("背景：\(name)")
+                    .accessibilityAddTraits(bg == preset ? .isSelected : [])
                 }
             }
             ColorPicker("背景颜色", selection: Binding(get: { Color(nsColor: bg.color.nsColor) },
@@ -178,8 +181,16 @@ struct ElementInspector: View {
                 NumberField(label: "Y", value: f.minY) { v in doc.update(first.id) { $0.move(dx: 0, dy: v - $0.frame.minY) } }
             }
             GridRow {
-                NumberField(label: "宽", value: f.width) { v in doc.update(first.id) { var r = $0.frame; r.size.width = v; $0.setFrame(r) } }
-                NumberField(label: "高", value: f.height) { v in doc.update(first.id) { var r = $0.frame; r.size.height = v; $0.setFrame(r) } }
+                NumberField(label: "宽", value: f.width) { v in
+                    doc.update(first.id) { e in
+                        let old = e
+                        var r = e.frame; r.size.width = v; e.setFrame(r)
+                        e.refitText(was: old)
+                    }
+                }
+                NumberField(label: "高", value: f.height) { v in
+                    doc.update(first.id) { e in var r = e.frame; r.size.height = v; e.setFrame(r); e.growToFitText() }
+                }
             }
             GridRow {
                 NumberField(label: "旋转", value: first.rotation) { v in doc.update(first.id) { $0.rotation = v } }
@@ -195,9 +206,12 @@ struct ElementInspector: View {
                 TextStyleEditor(spec: t) { new in
                     doc.update(first.id) { e in
                         guard case .text(let current) = e.content else { return }
+                        let old = e
                         var styled = new
                         styled.text = current.text
                         e.content = .text(styled)
+                        // A new size or font re-wraps the text; keep every line inside the box.
+                        e.refitText(was: old)
                     }
                 }
             }

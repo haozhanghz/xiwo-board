@@ -39,19 +39,19 @@ public struct SlideBackground: Codable, Hashable, Sendable {
         self.color = color; self.pattern = pattern; self.patternColor = patternColor; self.image = image
     }
 
-    /// Preset backgrounds in the 背景 panel.
-    public static let presets: [SlideBackground] = [
-        SlideBackground(),
-        SlideBackground(color: .chalkboard, patternColor: RGBA(1, 1, 1, 0.35)),
-        SlideBackground(color: RGBA(0.12, 0.12, 0.14), patternColor: RGBA(1, 1, 1, 0.3)),
-        SlideBackground(color: RGBA(0.99, 0.97, 0.90)),
-        SlideBackground(color: RGBA(0.90, 0.95, 1.0)),
-        SlideBackground(pattern: .grid),
-        SlideBackground(pattern: .fourLines, patternColor: RGBA(0.85, 0.3, 0.3)),
-        SlideBackground(pattern: .tianzige, patternColor: RGBA(0.2, 0.6, 0.3)),
-        SlideBackground(pattern: .ruled),
-        SlideBackground(pattern: .dots),
-        SlideBackground(color: .chalkboard, pattern: .grid, patternColor: RGBA(1, 1, 1, 0.25)),
+    /// Preset backgrounds in the 背景 panel, with the names they are announced by.
+    public static let presets: [(name: String, background: SlideBackground)] = [
+        ("白板", SlideBackground()),
+        ("绿板", SlideBackground(color: .chalkboard, patternColor: RGBA(1, 1, 1, 0.35))),
+        ("黑板", SlideBackground(color: RGBA(0.12, 0.12, 0.14), patternColor: RGBA(1, 1, 1, 0.3))),
+        ("米黄", SlideBackground(color: RGBA(0.99, 0.97, 0.90))),
+        ("浅蓝", SlideBackground(color: RGBA(0.90, 0.95, 1.0))),
+        ("方格", SlideBackground(pattern: .grid)),
+        ("四线三格", SlideBackground(pattern: .fourLines, patternColor: RGBA(0.85, 0.3, 0.3))),
+        ("田字格", SlideBackground(pattern: .tianzige, patternColor: RGBA(0.2, 0.6, 0.3))),
+        ("横线", SlideBackground(pattern: .ruled)),
+        ("点阵", SlideBackground(pattern: .dots)),
+        ("绿板方格", SlideBackground(color: .chalkboard, pattern: .grid, patternColor: RGBA(1, 1, 1, 0.25))),
     ]
 }
 
