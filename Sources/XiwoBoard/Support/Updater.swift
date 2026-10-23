@@ -8,7 +8,8 @@ private let log = Logger(subsystem: "io.github.haozhanghz.xiwoboard", category: 
 
 /// Checks the GitHub releases of this project for a newer build and installs it
 /// in place: download the arm64 zip, check its SHA-256, unpack, verify the
-/// signature and version, swap the app bundle and reopen.
+/// signature and version, swap the app bundle and reopen. A copy that runs from
+/// a read-only place cannot be swapped, so its update goes to /Applications.
 ///
 /// The app is ad-hoc signed, so there is no Sparkle-style signature to check;
 /// the published `.sha256` and `codesign --verify` guard against a corrupt or
@@ -67,7 +68,14 @@ final class Updater: ObservableObject {
         }
     }
 
-    private var stagedApp: URL?
+    private(set) var stagedApp: URL?
+    /// Where `stagedApp` goes; see `installLocation(for:applications:)`.
+    private(set) var installTarget: URL?
+    /// Where an update goes when this copy cannot be replaced where it is.
+    static var applicationsFolder = URL(fileURLWithPath: "/Applications")
+
+    /// True when this copy runs from a read-only place, so the update goes to /Applications.
+    var movesToApplications: Bool { Self.isReadOnlyLocation(Bundle.main.bundleURL) }
 
     var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
@@ -139,8 +147,11 @@ final class Updater: ObservableObject {
     func download(_ release: Release) async {
         phase = .downloading(release)
         do {
+            let target = try Self.installLocation(for: Bundle.main.bundleURL, applications: Self.applicationsFolder)
+            // Staged on the target's volume, so installing is a rename. The running copy's
+            // own volume may be read-only, which is what made staging fail before.
             let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                                                      appropriateFor: Bundle.main.bundleURL, create: true)
+                                                      appropriateFor: target.deletingLastPathComponent(), create: true)
             let zip = staging.appendingPathComponent(release.archive.name)
             try await fetch(release.archive, to: zip)
             if let checksum = release.checksum {
@@ -160,6 +171,7 @@ final class Updater: ObservableObject {
             // Downloads made here are not quarantined, but clear it in case the zip carried it.
             try? await Self.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
             stagedApp = app
+            installTarget = target
             phase = .ready(release)
             log.info("Update \(release.version, privacy: .public) staged at \(app.path, privacy: .public)")
         } catch {
@@ -170,23 +182,16 @@ final class Updater: ObservableObject {
 
     /// Swaps the app bundle for the staged one and reopens the app.
     func installAndRelaunch() {
-        guard case .ready = phase, let staged = stagedApp else { return }
+        guard case .ready = phase, let staged = stagedApp, let target = installTarget else { return }
         guard AppModel.shared.confirmClose() else { return }
-        let current = Bundle.main.bundleURL
         do {
-            if current.path.contains("/AppTranslocation/") { throw UpdateError.translocated }
-            guard FileManager.default.isWritableFile(atPath: current.deletingLastPathComponent().path) else {
-                throw UpdateError.notWritable(current.deletingLastPathComponent().path)
-            }
-            // New metadata only, so a quarantine flag on the old copy is not carried over.
-            _ = try FileManager.default.replaceItemAt(current, withItemAt: staged, backupItemName: nil,
-                                                      options: .usingNewMetadataOnly)
+            try Self.install(staged, at: target)
             stagedApp = nil
             // Reopen once this process has exited.
             let relaunch = Process()
             relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
             relaunch.arguments = ["-c", "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"$0\"",
-                                  current.path]
+                                  target.path]
             try relaunch.run()
         } catch {
             log.error("Update install failed: \(String(describing: error), privacy: .public)")
@@ -195,6 +200,37 @@ final class Updater: ObservableObject {
         }
         AppModel.shared.skipQuitConfirmation = true
         NSApp.terminate(nil)
+    }
+
+    /// Where the update for the copy at `current` goes: over that copy, unless it runs
+    /// from a read-only place. macOS runs an app opened straight from Downloads out of
+    /// a randomized read-only mount (App Translocation), and a disk image is read-only
+    /// too; such a copy cannot be replaced, so the update goes to `applications`.
+    nonisolated static func installLocation(for current: URL, applications: URL) throws -> URL {
+        let fm = FileManager.default
+        if !isReadOnlyLocation(current) {
+            let folder = current.deletingLastPathComponent()
+            guard fm.isWritableFile(atPath: folder.path) else { throw UpdateError.notWritable(folder.path) }
+            return current
+        }
+        guard fm.isWritableFile(atPath: applications.path) else { throw UpdateError.translocated }
+        return applications.appendingPathComponent("XiwoBoard.app")
+    }
+
+    nonisolated static func isReadOnlyLocation(_ url: URL) -> Bool {
+        url.path.contains("/AppTranslocation/")
+            || (try? url.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) == true
+    }
+
+    /// Puts the staged app at `target`, over the copy already there if any.
+    nonisolated static func install(_ staged: URL, at target: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: target.path) {
+            // New metadata only, so a quarantine flag on the old copy is not carried over.
+            _ = try fm.replaceItemAt(target, withItemAt: staged, backupItemName: nil, options: .usingNewMetadataOnly)
+        } else {
+            try fm.moveItem(at: staged, to: target)
+        }
     }
 
     private func fetch(_ asset: Asset, to destination: URL) async throws {
@@ -244,7 +280,7 @@ final class Updater: ObservableObject {
             case .checksumMismatch: return "下载的文件校验不通过，可能下载不完整，请重试。"
             case .badArchive: return "安装包内容不对（应用标识或版本号不符）。"
             case .toolFailed(let tool, let code): return "\(tool) 执行失败（\(code)）。"
-            case .translocated: return "XiwoBoard 正从临时位置运行。请先把它拖到「应用程序」文件夹，重新打开后再更新。"
+            case .translocated: return "XiwoBoard 正在只读的临时位置运行，也没有权限写入「应用程序」文件夹。请退出后在 Finder 里把它拖进「应用程序」，从那里打开后再更新。"
             case .notWritable(let dir): return "没有权限写入 \(dir)。请把 XiwoBoard 放到你有写入权限的文件夹（如「应用程序」）后再更新。"
             }
         }
@@ -329,6 +365,11 @@ struct UpdateView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("发现新版本 \(r.version)").font(.headline)
                 ReleaseNotes(text: r.notes)
+                if updater.movesToApplications {
+                    Text("XiwoBoard 现在在只读的临时位置运行（比如直接在「下载」里打开）。新版本会装进「应用程序」文件夹，以后请从那里打开。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack {
                     Button("跳过这个版本") { updater.skip(r) }
                     Link("在网页上查看", destination: r.page)
@@ -342,7 +383,9 @@ struct UpdateView: View {
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text("正在下载并校验 \(r.version)…") }
         case .ready(let r):
             VStack(alignment: .leading, spacing: 10) {
-                Text("\(r.version) 已下载并校验。重新打开 XiwoBoard 即可完成更新。")
+                Text(updater.movesToApplications
+                     ? "\(r.version) 已下载并校验，会装进「应用程序」文件夹。重新打开 XiwoBoard 即可完成更新。"
+                     : "\(r.version) 已下载并校验。重新打开 XiwoBoard 即可完成更新。")
                 Text("更新后，系统可能会再次请求录屏和麦克风权限。").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
