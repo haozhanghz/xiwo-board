@@ -295,14 +295,22 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         default:
             break
         }
-        switch e.charactersIgnoringModifiers?.lowercased() {
+        let key = e.charactersIgnoringModifiers?.lowercased()
+        if e.modifierFlags.contains(.command) {
+            guard key == "z" else { return false }
+            e.modifierFlags.contains(.shift) ? document.redo() : document.undo()
+            return true
+        }
+        // Letter keys work alone (tablet express keys send them too); ⌃/⌥ combos are not ours.
+        guard e.modifierFlags.isDisjoint(with: [.control, .option]) else { return false }
+        switch key {
         case "h": chromeVisible.toggle(); return true
         case "p": tools.tool = .pen; return true
-        case "e": tools.tool = .eraser; return true
+        // Toggles, so one key (or one tablet button) switches between eraser and pen.
+        case "e": tools.tool = tools.tool == .eraser ? .pen : .eraser; return true
+        case "c": document.clearInk(); return true   // clear this page's ink; ⌘Z brings it back
         case "l": tools.tool = .laser; return true
         case "v": tools.tool = .select; return true
-        case "z" where e.modifierFlags.contains(.command):
-            e.modifierFlags.contains(.shift) ? document.redo() : document.undo(); return true
         default: return false
         }
     }
