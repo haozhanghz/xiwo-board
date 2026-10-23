@@ -19,6 +19,13 @@ security import "$P12" -k "$KEYCHAIN" -P xiwoboard -T /usr/bin/codesign >&2
 rm -f "$P12"
 # Lets codesign use the key without a keychain prompt.
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+# codesign only finds keys in keychains on the search list (its --keychain just
+# narrows that search), so put this one first and keep the others.
+OTHERS=()
+while IFS= read -r k; do
+    [ "$k" = "$KEYCHAIN" ] || OTHERS+=("$k")
+done < <(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')
+security list-keychains -d user -s "$KEYCHAIN" ${OTHERS[@]+"${OTHERS[@]}"}
 
 IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"XiwoBoard Release Signing"/ { print $2; exit }')"
 [ -n "$IDENTITY" ] || { echo "No \"XiwoBoard Release Signing\" identity in XIWOBOARD_SIGNING_P12" >&2; exit 1; }
