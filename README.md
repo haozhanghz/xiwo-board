@@ -36,6 +36,7 @@
 ./scripts/build-app.sh          # 生成 build/XiwoBoard.app（arm64，ad-hoc 签名）
 open build/XiwoBoard.app
 swift test                      # 核心库单元测试
+build/XiwoBoard.app/Contents/MacOS/XiwoBoard --ink-bench   # 在屏幕外模拟写字，打印每次移动和抬笔的绘制耗时
 ```
 
 每次推送和 PR，GitHub Actions 都会在 Apple 芯片的 macOS 机器上编译、测试并打包。
