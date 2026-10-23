@@ -8,7 +8,7 @@ struct XiwoBoardApp: App {
     @StateObject private var app = AppModel.shared
 
     var body: some Scene {
-        WindowGroup("XiwoBoard") {
+        Window("XiwoBoard", id: "main") {
             RootView()
                 .environmentObject(app)
                 .environmentObject(app.tools)
@@ -39,7 +39,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
             let app = AppModel.shared
-            return app.skipQuitConfirmation || app.confirmClose() ? .terminateNow : .terminateCancel
+            guard app.skipQuitConfirmation || app.confirmClose() else { return .terminateCancel }
+            guard app.recorder.state != .idle else { return .terminateNow }
+            Task { @MainActor in
+                await app.recorder.stop()
+                sender.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
         }
     }
 
@@ -54,21 +60,24 @@ final class AppModel: ObservableObject {
     @Published var document: DocumentModel?
     let tools = ToolState()
     let recorder = LectureRecorder()
-    private(set) var presenter: PresentationController?
+    @Published private(set) var presenter: PresentationController?
     /// Set once unsaved changes were already handled, e.g. before relaunching into an update.
     var skipQuitConfirmation = false
 
     func newDocument(background: SlideBackground = SlideBackground()) {
+        guard presenter == nil else { return }
         guard confirmClose() else { return }
         document = DocumentModel(courseware: Courseware(slides: [Slide(background: background)]))
     }
 
     func openWithPanel() {
+        guard presenter == nil else { return }
         guard let url = Exporter.chooseCourseware() else { return }
         open(url)
     }
 
     func open(_ url: URL) {
+        guard presenter == nil else { return }
         guard confirmClose() else { return }
         do {
             let (doc, warnings) = try DocumentModel.open(url: url)
@@ -87,12 +96,14 @@ final class AppModel: ObservableObject {
     }
 
     func closeDocument() {
+        guard presenter == nil else { return }
         guard confirmClose() else { return }
         document = nil
     }
 
     /// Asks to save unsaved changes. Returns false if the user cancelled.
     func confirmClose() -> Bool {
+        document?.finishEditing()
         guard let doc = document, doc.isDirty else { return true }
         let a = NSAlert()
         a.messageText = "是否保存对「\(doc.title)」的修改？"
@@ -108,6 +119,7 @@ final class AppModel: ObservableObject {
 
     func startPresentation(fromBeginning: Bool = false) {
         guard let doc = document, presenter == nil else { return }
+        doc.finishEditing()
         if fromBeginning { doc.go(to: 0) }
         doc.selection = []
         let p = PresentationController(document: doc, tools: tools, recorder: recorder)
@@ -121,12 +133,15 @@ struct RootView: View {
     @EnvironmentObject var app: AppModel
 
     var body: some View {
-        if let doc = app.document {
-            EditorView(doc: doc)
-                .id(ObjectIdentifier(doc))
-        } else {
-            HomeView()
+        Group {
+            if let doc = app.document {
+                EditorView(doc: doc)
+                    .id(ObjectIdentifier(doc))
+            } else {
+                HomeView()
+            }
         }
+        .background(MainWindowCloseGuard())
     }
 }
 
@@ -138,11 +153,11 @@ struct AppCommands: Commands {
             Button("检查更新…") { UpdateWindow.checkNow() }
         }
         CommandGroup(replacing: .newItem) {
-            Button("新建课件") { app.newDocument() }.keyboardShortcut("n")
-            Button("打开课件…") { app.openWithPanel() }.keyboardShortcut("o")
+            Button("新建课件") { app.newDocument() }.keyboardShortcut("n").disabled(app.presenter != nil)
+            Button("打开课件…") { app.openWithPanel() }.keyboardShortcut("o").disabled(app.presenter != nil)
             Divider()
             Button("关闭课件") { app.closeDocument() }.keyboardShortcut("w", modifiers: [.command, .shift])
-                .disabled(app.document == nil)
+                .disabled(app.document == nil || app.presenter != nil)
         }
         CommandGroup(replacing: .saveItem) {
             Button("保存") { if let d = app.document { Exporter.save(d) } }.keyboardShortcut("s").disabled(app.document == nil)

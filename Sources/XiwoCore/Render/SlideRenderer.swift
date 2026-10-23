@@ -5,24 +5,25 @@ import ImageIO
 
 /// Decoded-image cache keyed by resource hash.
 public final class ImageCache: @unchecked Sendable {
-    private var images: [String: CGImage] = [:]
-    private let lock = NSLock()
+    private let images = NSCache<NSString, CGImage>()
 
-    public init() {}
+    public init() {
+        images.totalCostLimit = 128 * 1024 * 1024
+        images.countLimit = 128
+    }
 
     public func image(for key: String, in courseware: Courseware) -> CGImage? {
-        lock.lock(); defer { lock.unlock() }
-        if let img = images[key] { return img }
+        if let img = images.object(forKey: key as NSString) { return img }
         guard let data = courseware.resources[key]?.data,
               let src = CGImageSourceCreateWithData(data as CFData, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
-        images[key] = img
+        set(img, for: key)
         return img
     }
 
     /// Lets the app supply images it decoded itself (e.g. video poster frames).
     public func set(_ image: CGImage, for key: String) {
-        lock.lock(); images[key] = image; lock.unlock()
+        images.setObject(image, forKey: key as NSString, cost: image.bytesPerRow * image.height)
     }
 
     public static let shared = ImageCache()
@@ -412,8 +413,11 @@ public enum SlideRenderer {
     /// Renders a slide to a bitmap of `pixelSize` (thumbnails, export, recording previews).
     public static func image(of slide: Slide, courseware: Courseware, pixelWidth: Int, options: RenderOptions = RenderOptions()) -> CGImage? {
         let size = courseware.slideSize
+        guard pixelWidth > 0, size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
         let scale = CGFloat(pixelWidth) / size.width
-        let w = pixelWidth, h = max(1, Int((size.height * scale).rounded()))
+        let height = (size.height * scale).rounded()
+        guard height.isFinite, height < CGFloat(Int.max) else { return nil }
+        let w = pixelWidth, h = max(1, Int(height))
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) else { return nil }

@@ -27,8 +27,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     private enum Drag {
         case none
-        case drawing([StrokePoint])
-        case erasing
+        case drawing
+        case erasing(hasUndo: Bool)
         case moving(last: CGPoint, moved: Bool)
         case resizing(handle: Handle, original: BoardElement, start: CGPoint)
         case rotating(original: BoardElement)
@@ -41,6 +41,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     enum Handle: CaseIterable { case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
     private var drag: Drag = .none
+    private var liveStrokePoints: [StrokePoint] = []
     private var pointer: CGPoint?            // slide coordinates
     private var laserTrail: [(CGPoint, TimeInterval)] = []
     private var laserTimer: Timer?
@@ -158,8 +159,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     private func drawLiveContent(_ ctx: CGContext) {
         switch drag {
-        case .drawing(let pts):
-            SlideRenderer.drawStroke(Stroke(points: pts, color: tools.penColor, width: tools.penWidth, kind: tools.penKind),
+        case .drawing:
+            SlideRenderer.drawStroke(Stroke(points: liveStrokePoints, color: tools.penColor, width: tools.penWidth, kind: tools.penKind),
                                      origin: .zero, in: ctx)
         case .creatingShape(let type, let a, let b):
             let (rect, anti) = shapeRect(type, a, b)
@@ -319,10 +320,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
         switch tools.tool {
         case .pen:
-            drag = .drawing([StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))])
+            liveStrokePoints = [StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))]
+            drag = .drawing
         case .eraser:
-            document.beginGesture()
-            drag = .erasing
+            drag = .erasing(hasUndo: false)
             erase(at: p)
         case .laser:
             drag = .laser
@@ -410,11 +411,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         let p = toSlide(convert(event.locationInWindow, from: nil))
         pointer = p
         switch drag {
-        case .drawing(var pts):
-            let last = pts.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
+        case .drawing:
+            let last = liveStrokePoints.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
             if hypot(p.x - last.x, p.y - last.y) >= 0.8 / scale {
-                pts.append(StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p)))
-                drag = .drawing(pts)
+                liveStrokePoints.append(StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p)))
             }
         case .erasing:
             erase(at: p)
@@ -466,8 +466,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     override func mouseUp(with event: NSEvent) {
         switch drag {
-        case .drawing(let pts):
-            let simplified = Geometry.simplify(pts, tolerance: 0.35)
+        case .drawing:
+            let simplified = Geometry.simplify(liveStrokePoints, tolerance: 0.35)
             if !simplified.isEmpty {
                 document.editSlide { $0.elements.append(.stroke(points: simplified, color: self.tools.penColor,
                                                                 width: self.tools.penWidth, kind: self.tools.penKind)) }
@@ -485,6 +485,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             break
         }
         drag = .none
+        liveStrokePoints.removeAll(keepingCapacity: true)
         needsDisplay = true
     }
 
@@ -614,22 +615,27 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         let mode = tools.eraserMode
         let present = self.mode == .present
         var reveal: [String] = []
-        document.editSlideLive { s in
-            var out: [BoardElement] = []
-            for e in s.elements {
-                guard e.isStroke else {
-                    if present, e.masked, e.frame.insetBy(dx: -r, dy: -r).contains(p) { reveal.append(e.id) }
-                    out.append(e); continue
-                }
-                if mode == .stroke {
-                    if !e.hitTest(p, tolerance: r) { out.append(e) }
-                } else {
-                    out.append(contentsOf: e.erasing(center: p, radius: r))
-                }
+        var out: [BoardElement] = []
+        let original = document.slide.elements
+        for e in original {
+            guard e.isStroke && !e.locked else {
+                if present, e.masked, e.hitTest(p, tolerance: r) { reveal.append(e.id) }
+                out.append(e); continue
             }
-            s.elements = out
+            if mode == .stroke {
+                if !e.hitTest(p, tolerance: r) { out.append(e) }
+            } else {
+                out.append(contentsOf: e.erasing(center: p, radius: r))
+            }
         }
-        if !reveal.isEmpty { revealedMasks.formUnion(reveal) }
+        if out != original {
+            if case .erasing(let hasUndo) = drag, !hasUndo {
+                document.beginGesture()
+                drag = .erasing(hasUndo: true)
+            }
+            document.editSlideLive { $0.elements = out }
+        }
+        if !reveal.isEmpty, !Set(reveal).isSubset(of: revealedMasks) { revealedMasks.formUnion(reveal) }
     }
 
     private func recordLaser() {
@@ -658,6 +664,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     // MARK: In-place text editing
 
     func beginEditing(_ id: String, at point: CGPoint? = nil) {
+        document.finishEditing()
         guard let e = document.slide.element(id: id), !e.locked else { return }
         endEditing()
         var spec: TextSpec
@@ -685,6 +692,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         let tv = NSTextView(frame: toView(rect).insetBy(dx: 2, dy: 0))
         tv.delegate = self
         tv.isRichText = false
+        tv.allowsUndo = true
         tv.drawsBackground = true
         tv.backgroundColor = NSColor.white.withAlphaComponent(0.92)
         tv.font = NSFont(name: spec.fontName, size: spec.fontSize * scale) ?? .systemFont(ofSize: spec.fontSize * scale)
@@ -700,11 +708,13 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(tv)
         tv.selectAll(nil)
         editor = tv
+        document.commitPendingEditing = { [weak self] in self?.endEditing() }
         invalidateCache()
     }
 
     func endEditing() {
         guard let tv = editor, let id = editingID else { return }
+        document.commitPendingEditing = nil
         let text = tv.string
         let cell = editingCell
         editor = nil
