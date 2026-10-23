@@ -276,4 +276,22 @@ final class XiwoCoreTests: XCTestCase {
         CGImageDestinationAddImage(dest, img, nil)
         return CGImageDestinationFinalize(dest) ? d as Data : nil
     }
+
+    func testPenPressureFilterHoldsThroughLift() {
+        var f = PenPressureFilter()
+        XCTAssertEqual(f.next(0.5), 0.5, accuracy: 1e-9)
+        // Near-zero samples before the pen lifts keep the last pressure.
+        XCTAssertEqual(f.next(0.0), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(f.next(0.01), 0.5, accuracy: 1e-9)
+        // Real readings are smoothed, not taken raw.
+        let v = f.next(1.0)
+        XCTAssertGreaterThan(v, 0.5)
+        XCTAssertLessThan(v, 1.0)
+        // Out-of-range and non-finite input stays in 0...1.
+        XCTAssertLessThanOrEqual(f.next(7), 1)
+        XCTAssertLessThanOrEqual(f.next(.nan), 1)
+        f.reset()
+        XCTAssertEqual(f.next(0), 0.05, accuracy: 1e-9)
+        XCTAssertEqual(f.next(0.3), 0.3, accuracy: 1e-9)
+    }
 }
