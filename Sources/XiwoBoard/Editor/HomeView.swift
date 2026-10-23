@@ -114,6 +114,12 @@ struct HomeView: View {
             Spacer()
             Text("支持打开 .enbx 课件，\n授课时可原生录制屏幕与麦克风。")
                 .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("版本 \(Updater.shared.currentVersion)").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("检查更新") { UpdateWindow.checkNow() }
+                    .buttonStyle(.link).font(.caption)
+            }
         }
         .padding(20)
         .frame(width: 220)

@@ -1,7 +1,10 @@
 import AVFoundation
 import AppKit
 import CoreMedia
+import OSLog
 import ScreenCaptureKit
+
+private let log = Logger(subsystem: "io.github.haozhanghz.xiwoboard", category: "recorder")
 
 /// Records the lecture (录屏讲课) with ScreenCaptureKit: the presentation screen,
 /// the microphone and optionally system audio, written straight to an MP4 by
@@ -10,6 +13,9 @@ import ScreenCaptureKit
 /// When `coursewareOnly` is on, the presenter's own panels (toolbar, page list,
 /// timer…) are left out of the capture, so the video shows only the courseware
 /// and the teacher's ink, while the teacher still sees and uses the tools.
+///
+/// Each step is logged under the `recorder` category, so a failed start can be
+/// traced with `log show --predicate 'subsystem == "io.github.haozhanghz.xiwoboard"'`.
 @MainActor
 final class LectureRecorder: NSObject, ObservableObject {
     enum State: Equatable { case idle, starting, recording, stopping }
@@ -29,6 +35,7 @@ final class LectureRecorder: NSObject, ObservableObject {
     private var chromeWindows: () -> [NSWindow] = { [] }
     private let frameSink = FrameSink()
     private var outputURL: URL?
+    private var finishWaiter: CheckedContinuation<Void, Never>?
 
     var isRecording: Bool { state == .recording }
 
@@ -39,26 +46,30 @@ final class LectureRecorder: NSObject, ObservableObject {
         state = .starting
         targetWindow = window
         chromeWindows = chrome
+        log.info("Start requested (mic: \(self.recordMicrophone), system audio: \(self.recordSystemAudio), courseware only: \(self.coursewareOnly))")
+
+        guard Self.ensureScreenAccess(), await ensureMicrophoneAccess() else {
+            state = .idle
+            return
+        }
         do {
-            if !CGPreflightScreenCaptureAccess() {
-                CGRequestScreenCaptureAccess()
-            }
-            if recordMicrophone {
-                let ok = await AVCaptureDevice.requestAccess(for: .audio)
-                if !ok { recordMicrophone = false }
-            }
             let (filter, display) = try await makeFilter()
             let config = SCStreamConfiguration()
+            // H.264 tops out around 4K, so very large displays are scaled down.
             let scale = window.screen?.backingScaleFactor ?? 2
-            config.width = Int(Double(display.width) * scale)
-            config.height = Int(Double(display.height) * scale)
+            var width = Double(display.width) * scale, height = Double(display.height) * scale
+            if width > 3840 { height *= 3840 / width; width = 3840 }
+            config.width = Int(width) & ~1
+            config.height = Int(height) & ~1
             config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
             config.showsCursor = true
             config.queueDepth = 6
             config.capturesAudio = recordSystemAudio
             config.excludesCurrentProcessAudio = false
-            config.captureMicrophone = recordMicrophone
-            if recordMicrophone { config.microphoneCaptureDeviceID = AVCaptureDevice.default(for: .audio)?.uniqueID }
+            let microphone = recordMicrophone ? AVCaptureDevice.default(for: .audio) : nil
+            config.captureMicrophone = microphone != nil
+            if let microphone { config.microphoneCaptureDeviceID = microphone.uniqueID }
+            log.info("Capturing display \(display.displayID) at \(config.width)x\(config.height), microphone: \(microphone?.localizedName ?? "none", privacy: .public)")
 
             let url = Self.makeOutputURL(title: title)
             let rc = SCRecordingOutputConfiguration()
@@ -77,6 +88,7 @@ final class LectureRecorder: NSObject, ObservableObject {
             startDate = Date()
             elapsed = 0
             state = .recording
+            log.info("Recording to \(url.path, privacy: .public)")
             timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, let d = self.startDate else { return }
@@ -84,6 +96,7 @@ final class LectureRecorder: NSObject, ObservableObject {
                 }
             }
         } catch {
+            log.error("Start failed: \(String(describing: error), privacy: .public)")
             state = .idle
             stream = nil
             output = nil
@@ -95,19 +108,45 @@ final class LectureRecorder: NSObject, ObservableObject {
         guard state == .recording, let s = stream else { return }
         state = .stopping
         timer?.invalidate(); timer = nil
-        do { try await s.stopCapture() } catch { Self.report(error) }
-        if let output { try? s.removeRecordingOutput(output) }
+        // Removing the recording output finalises the file; wait for that before
+        // tearing down the stream.
+        if let output {
+            do {
+                try s.removeRecordingOutput(output)
+                await waitForFinish()
+            } catch {
+                log.error("Removing recording output failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+        do { try await s.stopCapture() } catch {
+            log.error("Stop capture failed: \(String(describing: error), privacy: .public)")
+        }
         stream = nil
         output = nil
         state = .idle
         if let url = outputURL {
             lastRecording = url
-            // The file is finalised asynchronously; reveal it once it is on disk.
             for _ in 0..<20 where !FileManager.default.fileExists(atPath: url.path) {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
+            log.info("Recording saved: \(FileManager.default.fileExists(atPath: url.path))")
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
+    }
+
+    private func waitForFinish() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            finishWaiter = c
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                self?.resumeFinishWaiter()
+            }
+        }
+    }
+
+    private func resumeFinishWaiter() {
+        finishWaiter?.resume()
+        finishWaiter = nil
     }
 
     /// Re-applies the filter, e.g. after the tool panels change or `coursewareOnly` flips.
@@ -132,11 +171,68 @@ final class LectureRecorder: NSObject, ObservableObject {
             let ids = Set(chromeWindows().filter(\.isVisible).map { CGWindowID($0.windowNumber) })
             excluded = content.windows.filter { ids.contains($0.windowID) }
         }
+        log.debug("Filter: \(apps.count) app(s), \(excluded.count) tool window(s) excluded")
         // Capture only our own windows so notifications and other apps stay out of the lecture.
         let filter = apps.isEmpty
             ? SCContentFilter(display: display, excludingWindows: excluded)
             : SCContentFilter(display: display, including: apps, exceptingWindows: excluded)
         return (filter, display)
+    }
+
+    // MARK: Permissions
+
+    private static let askedForScreenKey = "recorder.askedForScreenAccess"
+
+    /// Screen recording needs the 录屏与系统录音 permission, which only takes effect
+    /// after the app is reopened.
+    private static func ensureScreenAccess() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        let firstTime = !UserDefaults.standard.bool(forKey: askedForScreenKey)
+        UserDefaults.standard.set(true, forKey: askedForScreenKey)
+        // The first request shows the system prompt; later ones just return false.
+        if CGRequestScreenCaptureAccess() { return true }
+        log.notice("Screen recording permission missing (first request: \(firstTime))")
+        if firstTime { return false }
+        let a = NSAlert()
+        a.messageText = "需要「录屏与系统录音」权限"
+        a.informativeText = "请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中打开 XiwoBoard，然后退出并重新打开 XiwoBoard，再开始录制。"
+        a.addButton(withTitle: "打开系统设置")
+        a.addButton(withTitle: "取消")
+        if a.runModal() == .alertFirstButtonReturn { openPrivacySettings("Privacy_ScreenCapture") }
+        return false
+    }
+
+    /// Returns false to cancel the recording.
+    private func ensureMicrophoneAccess() async -> Bool {
+        guard recordMicrophone else { return true }
+        var status = AVCaptureDevice.authorizationStatus(for: .audio)
+        if status == .notDetermined {
+            status = await AVCaptureDevice.requestAccess(for: .audio) ? .authorized : .denied
+        }
+        log.info("Microphone permission: \(status.rawValue)")
+        if status == .authorized { return true }
+        let a = NSAlert()
+        a.messageText = "无法使用麦克风"
+        a.informativeText = "XiwoBoard 没有麦克风权限。可以先不录声音，或者在「系统设置 › 隐私与安全性 › 麦克风」中打开 XiwoBoard。"
+        a.addButton(withTitle: "不录声音，继续")
+        a.addButton(withTitle: "打开系统设置")
+        a.addButton(withTitle: "取消")
+        switch a.runModal() {
+        case .alertFirstButtonReturn:
+            recordMicrophone = false
+            return true
+        case .alertSecondButtonReturn:
+            Self.openPrivacySettings("Privacy_Microphone")
+            return false
+        default:
+            return false
+        }
+    }
+
+    private static func openPrivacySettings(_ anchor: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     static func makeOutputURL(title: String) -> URL {
@@ -172,16 +268,34 @@ final class LectureRecorder: NSObject, ObservableObject {
 extension LectureRecorder: SCStreamDelegate, SCRecordingOutputDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
+            log.error("Stream stopped: \(String(describing: error), privacy: .public)")
+            guard self.state == .recording else { return }
             self.timer?.invalidate(); self.timer = nil
             self.stream = nil
             self.output = nil
             self.state = .idle
+            if let url = self.outputURL, FileManager.default.fileExists(atPath: url.path) { self.lastRecording = url }
             Self.report(error)
         }
     }
 
+    nonisolated func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
+        log.info("Recording output started")
+    }
+
+    nonisolated func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
+        Task { @MainActor in
+            log.info("Recording output finished")
+            self.resumeFinishWaiter()
+        }
+    }
+
     nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
-        Task { @MainActor in Self.report(error) }
+        Task { @MainActor in
+            log.error("Recording output failed: \(String(describing: error), privacy: .public)")
+            self.resumeFinishWaiter()
+            Self.report(error)
+        }
     }
 }
 

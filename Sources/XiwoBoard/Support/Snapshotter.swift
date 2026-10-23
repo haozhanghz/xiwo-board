@@ -31,10 +31,22 @@ enum Snapshotter {
                to: dir.appendingPathComponent("home.png"))
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
                to: dir.appendingPathComponent("editor.png"))
+        // The narrowest window the app allows, and a smaller one that needs icon-only tools.
+        render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1000, height: 640),
+               to: dir.appendingPathComponent("editor-1000.png"))
+        render(EditorToolbar(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 820, height: 60),
+               to: dir.appendingPathComponent("toolbar-820.png"))
 
         let presenter = PresentationController(document: doc, tools: app.tools, recorder: app.recorder)
         render(PresentationToolbar(presenter: presenter).environmentObject(app.tools).environmentObject(app.recorder),
                size: nil, to: dir.appendingPathComponent("present-toolbar.png"))
+        render(RecordingOptions(presenter: presenter).environmentObject(app.recorder).padding(14)
+                .background(Color(white: 0.2)).environment(\.colorScheme, .dark),
+               size: nil, to: dir.appendingPathComponent("record-options.png"))
+        Updater.shared.preview(Updater.Release(version: "9.9.9", notes: "## 新功能\n\n- **录屏**修复\n- 应用内更新\n\n普通段落文字。",
+                                               page: URL(string: "https://github.com")!,
+                                               archive: .init(name: "x.zip", apiURL: URL(string: "https://github.com")!), checksum: nil))
+        render(UpdateView().environmentObject(Updater.shared), size: nil, to: dir.appendingPathComponent("update.png"))
         render(TimerView {}, size: nil, to: dir.appendingPathComponent("timer.png"))
         render(ShapePicker { _ in }.padding(12).background(Color(nsColor: .windowBackgroundColor)), size: nil,
                to: dir.appendingPathComponent("shapes.png"))

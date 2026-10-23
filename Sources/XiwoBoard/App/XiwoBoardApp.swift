@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if MainActor.assumeIsolated({ Snapshotter.runIfRequested() }) { return }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await Updater.shared.checkOnLaunch()
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -33,7 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        MainActor.assumeIsolated { AppModel.shared.confirmClose() ? .terminateNow : .terminateCancel }
+        MainActor.assumeIsolated {
+            let app = AppModel.shared
+            return app.skipQuitConfirmation || app.confirmClose() ? .terminateNow : .terminateCancel
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -48,6 +55,8 @@ final class AppModel: ObservableObject {
     let tools = ToolState()
     let recorder = LectureRecorder()
     private(set) var presenter: PresentationController?
+    /// Set once unsaved changes were already handled, e.g. before relaunching into an update.
+    var skipQuitConfirmation = false
 
     func newDocument(background: SlideBackground = SlideBackground()) {
         guard confirmClose() else { return }
@@ -125,6 +134,9 @@ struct AppCommands: Commands {
     @ObservedObject var app: AppModel
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("检查更新…") { UpdateWindow.checkNow() }
+        }
         CommandGroup(replacing: .newItem) {
             Button("新建课件") { app.newDocument() }.keyboardShortcut("n")
             Button("打开课件…") { app.openWithPanel() }.keyboardShortcut("o")

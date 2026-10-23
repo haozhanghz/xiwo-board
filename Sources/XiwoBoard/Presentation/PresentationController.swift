@@ -21,12 +21,21 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     @Published var showPages = false { didSet { layoutChrome() } }
     @Published var showTimer = false { didSet { layoutChrome() } }
 
+    /// Settings panels opened from the toolbar (笔、橡皮、形状、录制).
+    enum Flyout: Hashable { case pen, eraser, shape, record }
+    @Published private(set) var flyout: Flyout?
+    /// Toolbar button frames, in the toolbar's own coordinates, to place flyouts above them.
+    var flyoutAnchors: [Flyout: CGRect] = [:]
+
     private var window: NSWindow!
     private var canvas: BoardCanvasView!
     private var toolbarPanel: NSPanel!
     private var handlePanel: NSPanel!
     private var pagesPanel: NSPanel?
     private var timerPanel: NSPanel?
+    private var flyoutPanel: NSPanel?
+    private var flyoutClosedAt: (Flyout, Date)?
+    private var mouseMonitor: Any?
     private var startSnapshot: Courseware
     private var lastIndex: Int
     private var cancellables: Set<AnyCancellable> = []
@@ -42,7 +51,7 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         super.init()
     }
 
-    var chromeWindows: [NSWindow] { [toolbarPanel, handlePanel, pagesPanel, timerPanel].compactMap { $0 } }
+    var chromeWindows: [NSWindow] { [toolbarPanel, handlePanel, pagesPanel, timerPanel, flyoutPanel].compactMap { $0 } }
 
     func show() {
         let screen = NSApp.keyWindow?.screen ?? NSScreen.main ?? NSScreen.screens[0]
@@ -78,6 +87,14 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
             DispatchQueue.main.async { self?.pageChanged(to: i) }
         }.store(in: &cancellables)
         recorder.$state.sink { [weak self] _ in DispatchQueue.main.async { self?.layoutChrome() } }.store(in: &cancellables)
+        // A click anywhere outside the open flyout closes it.
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+            if let self, let open = self.flyout, e.window !== self.flyoutPanel {
+                self.flyoutClosedAt = (open, Date())
+                self.closeFlyout()
+            }
+            return e
+        }
         autoPlayMedia()
     }
 
@@ -131,7 +148,66 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
             }
             setVisible(timerPanel!, true)
         } else if let timerPanel { setVisible(timerPanel, false) }
+
+        if chromeVisible { positionFlyout() } else { closeFlyout() }
         recorder.refreshFilter()
+    }
+
+    // MARK: Flyouts
+
+    // SwiftUI popovers attached to the non-activating toolbar panel close on the
+    // first click without running the button inside, so the toolbar opens its
+    // settings in a panel of its own instead.
+    func toggleFlyout(_ kind: Flyout) {
+        // The mouse-down that reached the toolbar already closed this flyout.
+        if let closed = flyoutClosedAt, closed.0 == kind, Date().timeIntervalSince(closed.1) < 0.5 {
+            flyoutClosedAt = nil
+            return
+        }
+        if flyout == kind { closeFlyout() } else { openFlyout(kind) }
+    }
+
+    func openFlyout(_ kind: Flyout) {
+        closeFlyout()
+        let content: AnyView
+        switch kind {
+        case .pen: content = AnyView(PenSettings())
+        case .eraser: content = AnyView(EraserSettings(doc: document))
+        case .shape: content = AnyView(ShapePicker { [weak self] in self?.tools.tool = .shape($0); self?.closeFlyout() })
+        case .record: content = AnyView(RecordingOptions(presenter: self))
+        }
+        let view = content
+            .padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15)))
+            .environment(\.colorScheme, .dark)
+            .environmentObject(tools)
+            .environmentObject(recorder)
+            .padding(4)
+            .fixedSize()
+        flyoutPanel = makePanel(view)
+        flyout = kind
+        positionFlyout()
+        setVisible(flyoutPanel!, true)
+    }
+
+    func closeFlyout() {
+        if let p = flyoutPanel {
+            window.removeChildWindow(p)
+            p.orderOut(nil)
+            flyoutPanel = nil
+        }
+        if flyout != nil { flyout = nil }
+    }
+
+    private func positionFlyout() {
+        guard let p = flyoutPanel, let kind = flyout, let screen = window.screen else { return }
+        let size = p.contentView!.fittingSize
+        p.setContentSize(size)
+        let bar = toolbarPanel.frame
+        let anchorX = flyoutAnchors[kind].map { bar.minX + $0.midX } ?? bar.midX
+        let x = min(max(anchorX - size.width / 2, screen.frame.minX + 8), screen.frame.maxX - size.width - 8)
+        p.setFrameOrigin(NSPoint(x: x, y: bar.maxY + 6))
     }
 
     private func setVisible(_ panel: NSPanel, _ visible: Bool) {
@@ -204,7 +280,7 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         case 124, 125, 49, 121: next(); return true       // → ↓ space pagedown
         case 123, 126, 116: previous(); return true        // ← ↑ pageup
         case 53:                                           // esc
-            if !chromeVisible { chromeVisible = true } else { end() }
+            if flyout != nil { closeFlyout() } else if !chromeVisible { chromeVisible = true } else { end() }
             return true
         default:
             break
@@ -263,6 +339,9 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         }
         tools.tool = savedTool == .laser || savedTool == .spotlight || savedTool == .magnifier ? .select : savedTool
         cancellables.removeAll()
+        closeFlyout()
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        mouseMonitor = nil
         window.close()
         onClose?()
     }
@@ -294,11 +373,11 @@ struct PresentationToolbar: View {
             RibbonButton(title: "结束授课", systemImage: "xmark.circle", tint: .red) { presenter.end() }
             sep
             RibbonButton(title: "选择", systemImage: "cursorarrow", active: tools.tool == .select) { tools.tool = .select }
-            RibbonPopoverButton(title: "笔", systemImage: "pencil.tip", active: tools.tool == .pen, onTap: { tools.tool = .pen }) {
-                PenSettings()
+            flyoutButton(.pen, title: "笔", systemImage: "pencil.tip", active: tools.tool == .pen) {
+                if tools.tool == .pen { presenter.toggleFlyout(.pen) } else { tools.tool = .pen }
             }
-            RibbonPopoverButton(title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser, onTap: { tools.tool = .eraser }) {
-                EraserSettings(doc: doc)
+            flyoutButton(.eraser, title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser) {
+                if tools.tool == .eraser { presenter.toggleFlyout(.eraser) } else { tools.tool = .eraser }
             }
             RibbonButton(title: "撤消", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
             RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
@@ -309,7 +388,7 @@ struct PresentationToolbar: View {
                 RibbonButton(title: "放大镜", systemImage: "plus.magnifyingglass", active: tools.tool == .magnifier) { tools.tool = .magnifier }
                 RibbonButton(title: "计时器", systemImage: "timer", active: presenter.showTimer) { presenter.showTimer.toggle() }
                 RibbonButton(title: "板中板", systemImage: "rectangle.badge.plus") { presenter.insertBlankBoard() }
-                RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: isShape) { ShapePicker { tools.tool = .shape($0) } }
+                flyoutButton(.shape, title: "形状", systemImage: "square.on.circle", active: isShape) { presenter.toggleFlyout(.shape) }
             }
             sep
             recordButton
@@ -337,52 +416,82 @@ struct PresentationToolbar: View {
         .environment(\.colorScheme, .dark)
         .padding(4)
         .fixedSize()
+        .coordinateSpace(name: Self.space)
+        .onPreferenceChange(FlyoutAnchorKey.self) { presenter.flyoutAnchors = $0 }
     }
+
+    private static let space = "presentation-toolbar"
 
     private var sep: some View { Divider().frame(height: 32).padding(.horizontal, 2) }
 
+    private func flyoutButton(_ kind: PresentationController.Flyout, title: String, systemImage: String, active: Bool,
+                              action: @escaping () -> Void) -> some View {
+        RibbonButton(title: title, systemImage: systemImage, active: active || presenter.flyout == kind, action: action)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlyoutAnchorKey.self, value: [kind: g.frame(in: .named(Self.space))])
+            })
+    }
+
     private var isShape: Bool { if case .shape = tools.tool { return true } else { return false } }
 
-    @ViewBuilder private var recordButton: some View {
-        RibbonPopoverButton(title: recorder.isRecording ? LectureRecorder.format(recorder.elapsed) : "录制",
-                            systemImage: recorder.isRecording ? "stop.circle.fill" : "record.circle",
+    /// Opens the recording options while idle; stops straight away while recording.
+    private var recordButton: some View {
+        let title: String
+        switch recorder.state {
+        case .idle: title = "录制"
+        case .starting: title = "准备中"
+        case .recording: title = LectureRecorder.format(recorder.elapsed)
+        case .stopping: title = "保存中"
+        }
+        return flyoutButton(.record, title: title, systemImage: recorder.isRecording ? "stop.circle.fill" : "record.circle",
                             active: recorder.isRecording) {
-            RecordingOptions(presenter: presenter)
+            switch recorder.state {
+            case .idle: presenter.toggleFlyout(.record)
+            case .recording: presenter.toggleRecording()
+            case .starting, .stopping: break
+            }
         }
         .foregroundStyle(recorder.isRecording ? .red : .primary)
+        .help(recorder.isRecording ? "停止录制" : "录屏讲课")
+    }
+}
+
+private struct FlyoutAnchorKey: PreferenceKey {
+    static let defaultValue: [PresentationController.Flyout: CGRect] = [:]
+    static func reduce(value: inout [PresentationController.Flyout: CGRect], nextValue: () -> [PresentationController.Flyout: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 
 struct RecordingOptions: View {
     @ObservedObject var presenter: PresentationController
     @EnvironmentObject var recorder: LectureRecorder
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("录屏讲课").font(.headline)
             Toggle("只录课件（隐藏工具栏、计时器等功能页面）", isOn: $recorder.coursewareOnly)
-            Toggle("录制麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.isRecording)
-            Toggle("录制电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.isRecording)
-            Text("视频保存在「影片 › XiwoBoard 录课」。").font(.caption).foregroundStyle(.secondary)
+            Toggle("录制麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
+            Toggle("录制电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
+            Text("视频保存在「影片 › XiwoBoard 录课」。录制中再点一次「录制」按钮即可停止。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
-                if recorder.isRecording {
-                    Button(role: .destructive) { presenter.toggleRecording(); dismiss() } label: {
-                        Label("停止录制", systemImage: "stop.fill")
-                    }
-                } else {
-                    Button { presenter.toggleRecording(); dismiss() } label: {
-                        Label("开始录制", systemImage: "record.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(recorder.state != .idle)
+                Button {
+                    presenter.closeFlyout()
+                    presenter.toggleRecording()
+                } label: {
+                    Label("开始录制", systemImage: "record.circle")
                 }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(recorder.state != .idle)
                 if let last = recorder.lastRecording {
                     Button("打开上次录制") { NSWorkspace.shared.open(last) }
                 }
             }
         }
-        .frame(width: 300)
+        .frame(width: 320)
     }
 }
 
