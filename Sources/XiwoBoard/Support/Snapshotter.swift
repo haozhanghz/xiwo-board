@@ -52,6 +52,8 @@ enum Snapshotter {
         render(TimerView {}, size: nil, to: dir.appendingPathComponent("timer.png"))
         render(ShapePicker { _ in }.padding(12).background(Color(nsColor: .windowBackgroundColor)), size: nil,
                to: dir.appendingPathComponent("shapes.png"))
+        render(PenSettings().environmentObject(app.tools).padding(14).background(Color(nsColor: .windowBackgroundColor)), size: nil,
+               to: dir.appendingPathComponent("pen-settings.png"))
 
         for (i, s) in doc.courseware.slides.enumerated() {
             if let img = SlideRenderer.image(of: s, courseware: doc.courseware, pixelWidth: 1280),

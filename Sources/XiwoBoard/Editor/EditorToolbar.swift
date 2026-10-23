@@ -184,12 +184,15 @@ struct PenSettings: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
                 ForEach(ToolState.penWidths, id: \.self) { w in
                     Button { tools.penWidth = tools.penKind == .highlighter ? w * 3 : w } label: {
-                        Circle().fill(Color.primary).frame(width: min(22, w + 3), height: min(22, w + 3))
-                            .frame(width: 30, height: 30)
+                        Circle().fill(Color.primary).frame(width: dotSize(w), height: dotSize(w))
+                            .frame(width: 32, height: 32)
                             .background(isWidth(w) ? Color.accentColor.opacity(0.2) : .clear, in: Circle())
+                            // The whole cell takes the click, not just the dot: a thin pen's dot is a few points wide.
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("笔宽 \(Int(tools.penKind == .highlighter ? w * 3 : w))")
@@ -204,6 +207,9 @@ struct PenSettings: View {
     private func isWidth(_ w: Double) -> Bool {
         tools.penWidth == (tools.penKind == .highlighter ? w * 3 : w)
     }
+
+    /// Grows with the log of the width so the thin pens still look different from each other.
+    private func dotSize(_ w: Double) -> Double { 4 + 4 * log2(w) }
 }
 
 struct ColorSwatches: View {
