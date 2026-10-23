@@ -1,13 +1,25 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 
 /// Writes the subset of our model that maps onto `.enbx` structures
 /// (shapes, text, pictures, media, groups; ink is written as path shapes).
 /// The layout matches what `EnbxImporter` reads; see that type for the format notes.
+/// What has no enbx form at all is listed by `losses(in:)`; a few things this app needs
+/// back are kept in extra `Xiwo…` fields that other readers skip.
 public enum EnbxExporter {
     public static func encode(_ courseware: Courseware) -> Data {
         var cw = courseware
         cw.pruneResources()
+        // Writing patterns (书写格) have no enbx form, so a patterned page gets a picture of
+        // its whole background, which any reader shows; XiwoBackground keeps the pattern
+        // itself for this app to read back.
+        var backgroundPictures: [String: String] = [:]
+        for slide in cw.slides where slide.background.pattern != .none {
+            if let png = backgroundPicture(slide.background, courseware: cw) {
+                backgroundPictures[slide.id] = cw.addResource(data: png, name: "背景.png", ext: "png")
+            }
+        }
         var zip = ZipWriter()
         let stamp = Self.timestamp()
         zip.add("Document.xml", data: xml(node("Document", [
@@ -27,27 +39,88 @@ public enum EnbxExporter {
         }
         zip.add("Reference.xml", data: xml(node("Reference", [node("Relationships", rels)])))
         for (i, slide) in cw.slides.enumerated() {
-            zip.add("Slides/Slide_\(i).xml", data: xml(slideNode(slide, size: cw.slideSize)))
+            zip.add("Slides/Slide_\(i).xml", data: xml(slideNode(slide, size: cw.slideSize, picture: backgroundPictures[slide.id])))
         }
         return zip.finish()
     }
 
-    static func slideNode(_ s: Slide, size: CGSize) -> XNode {
+    /// What an enbx export of `courseware` cannot keep as it is, in words for the person
+    /// exporting; empty when everything maps.
+    public static func losses(in courseware: Courseware) -> [String] {
+        var found: [String] = []
+        func note(_ loss: String) { if !found.contains(loss) { found.append(loss) } }
+        func visit(_ e: BoardElement) {
+            switch e.content {
+            case .stroke(let s):
+                note("笔迹会变成线条形状，之后不能再用橡皮擦除")
+                if s.kind != .pen { note("毛笔的粗细变化和荧光笔压在文字下面的效果不保留") }
+            case .table:
+                note("表格会变成纯文本")
+            case .media(let m) where m.autoPlay || m.loop:
+                note("音视频的自动播放和循环播放设置不保留")
+            case .group(let children):
+                children.forEach(visit)
+            default:
+                break
+            }
+        }
+        for slide in courseware.slides {
+            if slide.background.pattern != .none { note("书写格背景会存成一张背景图片") }
+            slide.elements.forEach(visit)
+        }
+        return found
+    }
+
+    /// The page background, pattern included, as a PNG at twice the page size (at most 4K).
+    static func backgroundPicture(_ background: SlideBackground, courseware: Courseware) -> Data? {
+        let size = courseware.slideSize
+        let scale = min(2, 3840 / max(size.width, size.height))
+        guard scale.isFinite, scale > 0,
+              let image = SlideRenderer.image(of: Slide(background: background), courseware: courseware,
+                                              pixelWidth: Int((size.width * scale).rounded())) else { return nil }
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, nil)
+        return CGImageDestinationFinalize(dest) ? data as Data : nil
+    }
+
+    static func slideNode(_ s: Slide, size: CGSize, picture: String? = nil) -> XNode {
         var bg: [XNode] = [leaf("ColorBrush", s.background.color.argbHex)]
-        if let img = s.background.image {
+        if let img = picture ?? s.background.image {
             bg = [node("ImageBrush", [leaf("Source", "id://\(img)"), leaf("Stretch", "Fill"), leaf("Opacity", "1")])]
         }
         var children: [XNode] = [leaf("Id", s.id), leaf("Width", num(size.width)), leaf("Height", num(size.height)),
-                                 node("Background", bg), leaf("Duration", "5000000")]
+                                 node("Background", bg)]
+        if picture != nil {
+            var own = [leaf("Color", s.background.color.argbHex), leaf("Pattern", s.background.pattern.rawValue),
+                       leaf("PatternColor", s.background.patternColor.argbHex)]
+            if let img = s.background.image { own.append(leaf("Image", "id://\(img)")) }
+            children.append(node("XiwoBackground", own))
+        }
+        if let name = s.name, !name.isEmpty { children.append(leaf("SlideName", name)) }
+        if s.transition != .none { children.append(leaf("TransitionKey", transitionKey(s.transition))) }
+        children.append(leaf("Duration", "5000000"))
         if !s.notes.isEmpty { children.append(node("SlideNote", [leaf("Text", s.notes)])) }
         children.append(node("Elements", s.elements.map(elementNode)))
         return node("Slide", children)
     }
 
-    static func base(_ e: BoardElement) -> [XNode] {
+    /// `TransitionKey` value for a page transition: "Fade", "Push", "Reveal".
+    static func transitionKey(_ t: SlideTransition) -> String {
+        t.rawValue.prefix(1).uppercased() + t.rawValue.dropFirst()
+    }
+
+    /// enbx lines run from the top-left corner of their box to the bottom-right. Turned by
+    /// this many degrees about its centre, such a line runs from the bottom-left corner to
+    /// the top-right instead, as an anti-diagonal line (like a y axis) does.
+    static func antiDiagonalTurn(_ size: CGSize) -> Double {
+        -2 * atan2(Double(size.height), Double(size.width)) * 180 / .pi
+    }
+
+    static func base(_ e: BoardElement, rotation: Double? = nil) -> [XNode] {
         var out = [leaf("Id", e.id), leaf("X", num(e.frame.minX)), leaf("Y", num(e.frame.minY)),
                    leaf("Width", num(e.frame.width)), leaf("Height", num(e.frame.height)),
-                   leaf("Rotation", num(e.rotation)), leaf("IsLocked", bool(e.locked)),
+                   leaf("Rotation", num(rotation ?? e.rotation)), leaf("IsLocked", bool(e.locked)),
                    leaf("CanClone", bool(e.cloneOnDrag)), leaf("HasMask", bool(e.masked))]
         if let link = e.hyperlink { out.append(leaf("Hyperlink", link)) }
         return out
@@ -56,7 +129,11 @@ public enum EnbxExporter {
     static func elementNode(_ e: BoardElement) -> XNode {
         switch e.content {
         case .shape(let s):
-            var c = base(e)
+            // A line drawn the other way is turned to match, and marked so this app reads
+            // it back as it was drawn.
+            let anti = s.type.isLine && s.antiDiagonal == true
+            var c = base(e, rotation: anti ? e.rotation + antiDiagonalTurn(e.frame.size) : nil)
+            if anti { c.append(leaf("XiwoAntiDiagonal", "True")) }
             c.append(node("Foreground", [leaf("ColorBrush", s.style.stroke.argbHex)]))
             c.append(node("Background", [leaf("ColorBrush", (s.style.fill ?? .clear).argbHex)]))
             c.append(leaf("Thickness", num(s.style.lineWidth)))
@@ -82,6 +159,7 @@ public enum EnbxExporter {
             var c = base(e)
             c.append(richText(t))
             if let bg = t.background { c.append(leaf("Fill", bg.argbHex)) }
+            c.append(leaf("Opacity", num(e.opacity)))
             return node("Text", c)
         case .image(let img):
             var c = base(e)
@@ -93,14 +171,17 @@ public enum EnbxExporter {
             var c = base(e)
             c.append(leaf("Source", "id://\(m.resource)"))
             c.append(leaf("MediaName", m.name))
+            c.append(leaf("Opacity", num(e.opacity)))
             return node(m.kind == .video ? "Video" : "Audio", c)
         case .table(let t):
             // No public table schema; flatten to text so content survives the trip.
             var c = base(e)
             c.append(richText(TextSpec(text: t.cells.map { $0.joined(separator: "\t") }.joined(separator: "\n"), fontSize: t.fontSize)))
+            c.append(leaf("Opacity", num(e.opacity)))
             return node("Text", c)
         case .group(let g):
             var c = base(e)
+            c.append(leaf("Opacity", num(e.opacity)))
             c.append(node("Elements", g.map(elementNode)))
             return node("Group", c)
         }

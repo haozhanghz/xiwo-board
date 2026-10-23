@@ -50,6 +50,15 @@ enum Exporter {
 
     static func exportEnbx(_ doc: DocumentModel) {
         doc.finishEditing()
+        let losses = EnbxExporter.losses(in: doc.courseware)
+        if !losses.isEmpty {
+            let a = NSAlert()
+            a.messageText = "导出为 .enbx 会改变部分内容"
+            a.informativeText = losses.map { "• " + $0 }.joined(separator: "\n") + "\n\n完整的课件请继续保存为 .xwb。"
+            a.addButton(withTitle: "继续导出")
+            a.addButton(withTitle: "取消")
+            guard a.runModal() == .alertFirstButtonReturn else { return }
+        }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.enbx]
         panel.nameFieldStringValue = doc.title + ".enbx"

@@ -78,14 +78,22 @@ public struct EnbxImporter {
     mutating func parseSlide(_ node: XMLElement) -> Slide {
         var slide = Slide(id: node.child("Id")?.text ?? BoardElement.newID())
         slide.name = node.child("SlideName")?.text
-        if let bg = node.child("Background") {
+        if let own = node.child("XiwoBackground") {
+            // Written by EnbxExporter next to a picture of a patterned background: the
+            // background as this app had it, in place of the picture.
+            if let c = own.child("Color")?.text.flatMap(RGBA.init(hex:)) { slide.background.color = c }
+            if let p = own.child("Pattern")?.text.flatMap(BackgroundPattern.init(rawValue:)) { slide.background.pattern = p }
+            if let c = own.child("PatternColor")?.text.flatMap(RGBA.init(hex:)) { slide.background.patternColor = c }
+            if let img = own.child("Image")?.text { slide.background.image = resource(for: img) }
+        } else if let bg = node.child("Background") {
             if let c = brushColor(bg) { slide.background.color = c }
             if let img = bg.child("ImageBrush")?.child("Source")?.text, let key = resource(for: img) {
                 slide.background.image = key
             }
         }
+        if let key = node.child("TransitionKey")?.text { slide.transition = Self.transition(named: key) }
         if let note = node.child("SlideNote") {
-            slide.notes = note.descendants("Text").compactMap(\.text).joined(separator: "\n")
+            slide.notes = note.descendants("Text").compactMap(\.rawText).joined(separator: "\n")
         }
         slide.elements = parseElements(node.child("Elements"))
         return slide
@@ -106,12 +114,24 @@ public struct EnbxImporter {
                                    cloneOnDrag: node.child("CanClone")?.bool ?? false,
                                    hyperlink: node.child("Hyperlink")?.text,
                                    content: .group([]))
-        if let o = node.child("Opacity")?.double { element.opacity = o }
+        // Pictures carry theirs as Alpha.
+        if let o = (node.child("Opacity") ?? node.child("Alpha"))?.double, o.isFinite { element.opacity = min(1, max(0, o)) }
         switch node.name ?? "" {
         case "Shape":
-            element.content = .shape(parseShape(node, frame: frame))
+            var shape = parseShape(node, frame: frame)
+            if shape.type.isLine, node.child("XiwoAntiDiagonal")?.bool == true {
+                // EnbxExporter turned this line to run the other way; undo the turn.
+                shape.antiDiagonal = true
+                let turned = (element.rotation - EnbxExporter.antiDiagonalTurn(frame.size)).truncatingRemainder(dividingBy: 360)
+                let rounded = (turned * 1000).rounded() / 1000
+                element.rotation = abs(rounded) < 0.01 ? 0 : rounded
+            }
+            element.content = .shape(shape)
         case "Text":
             element.content = .text(parseText(node))
+            // Other apps measure text differently; keep every line inside the box so all
+            // of it can be clicked.
+            element.growToFitText()
         case "Picture":
             guard let src = node.child("Source")?.text, let key = resource(for: src) else {
                 warnings.append("图片资源缺失"); return nil
@@ -168,20 +188,33 @@ public struct EnbxImporter {
                !f.isEmpty, f.count < 64 {
                 spec.fontName = f
             }
+            if let decoration = (run.child("Decoration") ?? run.child("TextDecorations"))?.stringValue {
+                spec.underline = decoration.lowercased().contains("underline")
+            }
         }
+        if let fill = node.child("Fill"), let c = brushColor(fill), c.a > 0 { spec.background = c }
         return spec
+    }
+
+    /// Page transition for a `TransitionKey`; kinds this app has no counterpart for become none.
+    static func transition(named key: String) -> SlideTransition {
+        let k = key.lowercased()
+        if k.contains("fade") { return .fade }
+        if k.contains("push") { return .push }
+        if k.contains("reveal") || k.contains("uncover") { return .reveal }
+        return .none
     }
 
     /// Joins `TextRun` texts, one line per `TextLine` (RichText > TextLines > TextLine > TextRuns > TextRun).
     static func plainText(of node: XMLElement) -> String {
         let lines = node.descendants("TextLine")
         if !lines.isEmpty {
-            return lines.map { $0.descendants("TextRun").compactMap { $0.child("Text")?.text }.joined() }
+            return lines.map { $0.descendants("TextRun").compactMap { $0.child("Text")?.rawText }.joined() }
                 .joined(separator: "\n")
         }
-        let runs = node.descendants("TextRun").compactMap { $0.child("Text")?.text }
+        let runs = node.descendants("TextRun").compactMap { $0.child("Text")?.rawText }
         if !runs.isEmpty { return runs.joined() }
-        return node.child("Text")?.text ?? ""
+        return node.child("Text")?.rawText ?? ""
     }
 
     static func shapeType(named name: String) -> ShapeType? {
@@ -246,6 +279,11 @@ extension XMLElement {
     var text: String? {
         guard elementChildren.isEmpty else { return nil }
         return stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// A leaf's text exactly as written, spaces at either end included.
+    var rawText: String? {
+        guard elementChildren.isEmpty else { return nil }
+        return stringValue
     }
     var double: Double? { text.flatMap(Double.init) }
     var bool: Bool? { text.map { $0.lowercased() == "true" } }

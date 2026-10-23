@@ -39,6 +39,8 @@ public struct RenderOptions {
     /// Hide these element ids (e.g. a text box being edited in place).
     public var hidden: Set<String>
     public var cache: ImageCache
+    /// Opacity of the groups the element being drawn sits in; its own multiplies it.
+    var groupOpacity: Double = 1
 
     public init(drawMasks: Bool = true, maskOpacity: Double = 1, revealedMasks: Set<String> = [], hidden: Set<String> = [],
                 cache: ImageCache = .shared) {
@@ -150,7 +152,8 @@ public enum SlideRenderer {
             ctx.rotate(by: e.rotation * .pi / 180)
             ctx.translateBy(x: -e.frame.midX, y: -e.frame.midY)
         }
-        ctx.setAlpha(e.opacity)
+        let opacity = e.opacity * options.groupOpacity
+        ctx.setAlpha(opacity)
         let f = e.frame
         switch e.content {
         case .stroke(let s):
@@ -173,7 +176,9 @@ public enum SlideRenderer {
         case .table(let t):
             drawTable(t, in: f, ctx: ctx)
         case .group(let children):
-            for c in children { draw(c, courseware: courseware, in: ctx, options: options) }
+            var inside = options
+            inside.groupOpacity = opacity
+            for c in children { draw(c, courseware: courseware, in: ctx, options: inside) }
         }
         if e.masked && options.drawMasks && !options.revealedMasks.contains(e.id) {
             ctx.setAlpha(options.maskOpacity)

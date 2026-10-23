@@ -23,6 +23,8 @@ struct RibbonButton: View {
     let systemImage: String
     var active = false
     var tint: Color? = nil
+    /// What VoiceOver says, when the title alone does not tell what the button does.
+    var label: String? = nil
     let action: () -> Void
     @Environment(\.ribbonDensity) private var density
 
@@ -31,7 +33,8 @@ struct RibbonButton: View {
             VStack(spacing: 3) {
                 Image(systemName: systemImage).font(.system(size: 17, weight: .medium)).frame(height: 20)
                 if density != .iconOnly {
-                    Text(title).font(.system(size: 11)).fixedSize()
+                    // Even-width digits, so a ticking time does not change the button's width.
+                    Text(title).font(.system(size: 11).monospacedDigit()).fixedSize()
                 }
             }
             .frame(minWidth: density == .regular ? 46 : 32, minHeight: density == .iconOnly ? 34 : 0)
@@ -42,7 +45,7 @@ struct RibbonButton: View {
         }
         .buttonStyle(.plain)
         .help(title)
-        .accessibilityLabel(title)
+        .accessibilityLabel(label ?? title)
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
@@ -315,11 +318,15 @@ struct TablePicker: View {
                 ForEach(1...8, id: \.self) { r in
                     HStack(spacing: 3) {
                         ForEach(1...8, id: \.self) { c in
-                            Rectangle()
-                                .fill(r <= hover.0 && c <= hover.1 ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.15))
-                                .frame(width: 18, height: 18)
-                                .onHover { if $0 { hover = (r, c) } }
-                                .onTapGesture { pick(r, c); dismiss() }
+                            // Buttons, so each size can be picked by name with VoiceOver or the keyboard.
+                            Button { pick(r, c); dismiss() } label: {
+                                Rectangle()
+                                    .fill(r <= hover.0 && c <= hover.1 ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.15))
+                                    .frame(width: 18, height: 18)
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { if $0 { hover = (r, c) } }
+                            .accessibilityLabel("插入 \(r) 行 \(c) 列的表格")
                         }
                     }
                 }
