@@ -121,7 +121,9 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     func layoutChrome() {
         guard !isEnding, let window, let screen = window.screen else { return }
         let frame = screen.frame
-        let toolbarSize = toolbarPanel.contentView!.fittingSize
+        let fitting = toolbarPanel.contentView!.fittingSize
+        // Rounded up so the layout the toolbar measured with still fits once placed.
+        let toolbarSize = NSSize(width: fitting.width.rounded(.up), height: fitting.height.rounded(.up))
         toolbarPanel.setContentSize(toolbarSize)
         toolbarPanel.setFrameOrigin(NSPoint(x: frame.midX - toolbarSize.width / 2, y: frame.minY + 18))
         let hs = handlePanel.contentView!.fittingSize
@@ -397,23 +399,29 @@ struct PresentationToolbar: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            buttons.environment(\.ribbonDensity, .regular)
-            buttons.environment(\.ribbonDensity, .tight)
-            buttons.environment(\.ribbonDensity, .iconOnly)
-            ScrollView(.horizontal, showsIndicators: true) {
+            bar(buttons.environment(\.ribbonDensity, .regular))
+            bar(buttons.environment(\.ribbonDensity, .tight))
+            bar(buttons.environment(\.ribbonDensity, .iconOnly))
+            bar(ScrollView(.horizontal, showsIndicators: true) {
                 buttons.environment(\.ribbonDensity, .iconOnly)
-            }
-            .frame(width: maxWidth)
+            })
         }
+        // Only caps the width on narrow screens. Each layout carries its own background
+        // and the scrolling one has no fixed width, so on a wide screen the panel stays
+        // as wide as the buttons instead of stretching across the screen.
         .frame(maxWidth: maxWidth)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.15)))
         .environment(\.colorScheme, .dark)
         .padding(4)
         .fixedSize(horizontal: false, vertical: true)
         .coordinateSpace(name: Self.space)
         .onPreferenceChange(FlyoutAnchorKey.self) { presenter.flyoutAnchors = $0 }
         .disabled(presenter.isEnding)
+    }
+
+    private func bar(_ content: some View) -> some View {
+        content
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.15)))
     }
 
     private var buttons: some View {
