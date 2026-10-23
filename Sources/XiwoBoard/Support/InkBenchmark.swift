@@ -134,7 +134,10 @@ enum InkBenchmark {
         var rng = LCG(seed: 7)
         for _ in 0..<300 {
             let o = CGPoint(x: rng.next() * 1200, y: 180 + rng.next() * 500)
-            let pts = (0..<40).map { i in StrokePoint(x: o.x + Double(i) * 1.5, y: o.y + sin(Double(i) / 5) * 12) }
+            let pts = (0..<40).map { (i: Int) -> StrokePoint in
+                let t = Double(i)
+                return StrokePoint(x: o.x + t * 1.5, y: o.y + sin(t / 5) * 12)
+            }
             slide.elements.append(.stroke(points: pts, color: .blue, width: 4, kind: .pen))
         }
         cw.slides = [slide]
@@ -152,17 +155,20 @@ enum InkBenchmark {
                     let a = CGPoint(x: cell.x + rng.next() * 90, y: cell.y + rng.next() * 90)
                     let angle = rng.next() * 2 * .pi, length = 30 + rng.next() * 60, bend = (rng.next() - 0.5) * 30
                     let n = Int(length / 3)
-                    strokes.append((0...n).map { i in
+                    strokes.append((0...n).map { (i: Int) -> CGPoint in
                         let t = Double(i) / Double(n)
-                        return CGPoint(x: a.x + cos(angle) * length * t - sin(angle) * bend * sin(t * .pi),
-                                       y: a.y + sin(angle) * length * t + cos(angle) * bend * sin(t * .pi))
+                        let along: Double = length * t, across: Double = bend * sin(t * .pi)
+                        let x: Double = a.x + cos(angle) * along - sin(angle) * across
+                        let y: Double = a.y + sin(angle) * along + cos(angle) * across
+                        return CGPoint(x: x, y: y)
                     })
                 }
             }
         }
-        strokes.append((0..<1200).map { i in
+        strokes.append((0..<1200).map { (i: Int) -> CGPoint in
             let t = Double(i) / 40
-            return CGPoint(x: 640 + cos(t) * (60 + Double(i) / 6), y: 400 + sin(t) * (40 + Double(i) / 9))
+            let rx: Double = 60 + Double(i) / 6, ry: Double = 40 + Double(i) / 9
+            return CGPoint(x: 640 + cos(t) * rx, y: 400 + sin(t) * ry)
         })
         return strokes
     }
