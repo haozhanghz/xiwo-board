@@ -33,7 +33,7 @@
 需要 macOS 15 及以上、Xcode 16 及以上（在 Xcode 27 / macOS 27 上验证）。
 
 ```bash
-./scripts/build-app.sh          # 生成 build/XiwoBoard.app（arm64，ad-hoc 签名）
+./scripts/build-app.sh          # 生成 build/XiwoBoard.app（arm64；本地构建是 ad-hoc 签名，发布包用项目证书，见 docs/SIGNING.md）
 open build/XiwoBoard.app
 swift test                      # 核心库单元测试
 build/XiwoBoard.app/Contents/MacOS/XiwoBoard --ink-bench   # 在屏幕外模拟写字，打印每次移动和抬笔的绘制耗时
@@ -44,6 +44,7 @@ build/XiwoBoard.app/Contents/MacOS/XiwoBoard --ink-bench   # 在屏幕外模拟�
 发布说明取自 `docs/releases/v<版本号>.md`。所以发新版只需要改版本号、写好发布说明，再合进 `main`。
 
 第一次录屏时，系统会请求「录屏与系统录音」和麦克风权限；授权后需要重新打开应用。
+发布包用项目自己的证书签名，所以从 0.1.9 起，更新后这些权限会保留。
 
 ## 目录
 

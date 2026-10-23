@@ -24,6 +24,11 @@ if [ -f Resources/AppIcon-1024.png ]; then
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Ad-hoc signature so macOS remembers microphone / screen-recording permission.
-codesign --force --sign - "$APP"
+# Releases carry the project certificate (SIGN_IDENTITY, see docs/SIGNING.md) so macOS
+# keeps screen-recording and microphone permission across updates. Without it the
+# app is ad-hoc signed, and an ad-hoc signature changes with every build.
+SIGN_ARGS=(--force --sign "${SIGN_IDENTITY:--}")
+if [ -n "${SIGN_KEYCHAIN:-}" ]; then SIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN"); fi
+codesign "${SIGN_ARGS[@]}" "$APP"
+codesign --display --requirements - "$APP" 2>/dev/null | grep 'designated =>' || true
 echo "Built $APP"
