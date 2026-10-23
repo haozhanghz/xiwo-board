@@ -70,18 +70,20 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             }
         }.store(in: &cancellables)
         TabletInput.shared.start()
-        NotificationCenter.default.publisher(for: .tabletProximityChanged).sink { [weak self] _ in
-            guard let self else { return }
-            self.window?.invalidateCursorRects(for: self)
-            self.needsDisplay = true
+        NotificationCenter.default.publisher(for: .tabletEraserChanged).sink { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.window?.invalidateCursorRects(for: self)
+                self.needsDisplay = true
+            }
         }.store(in: &cancellables)
     }
 
     /// The tool a press acts with: turning a tablet pen over to its eraser end
-    /// (or holding a side button set to "eraser" in the tablet driver) erases
-    /// while the pen tool is selected, without changing the toolbar choice.
-    private var activeTool: Tool {
-        if tools.tool == .pen, TabletInput.shared.isEraser { return .eraser }
+    /// erases while the pen tool is selected, without changing the toolbar choice.
+    /// Without an event it answers for cursor and overlay drawing.
+    private func activeTool(_ event: NSEvent? = nil) -> Tool {
+        if tools.tool == .pen, TabletInput.shared.isEraser(event) { return .eraser }
         return tools.tool
     }
 
@@ -237,7 +239,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private func drawOverlays(_ ctx: CGContext) {
         guard let p = pointer else { return }
         let vp = toView(p)
-        switch activeTool {
+        switch activeTool() {
         case .eraser:
             let r = tools.eraserSize / 2 * scale
             ctx.setStrokeColor(NSColor.gray.cgColor)
@@ -302,7 +304,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     override func resetCursorRects() {
         let cursor: NSCursor
-        switch activeTool {
+        switch activeTool() {
         case .pen, .shape: cursor = .crosshair
         case .text: cursor = .iBeam
         case .laser, .spotlight, .magnifier, .eraser: cursor = NSCursor(image: NSImage(size: NSSize(width: 1, height: 1)), hotSpot: .zero)
@@ -316,7 +318,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     override func mouseMoved(with event: NSEvent) {
         pointer = toSlide(convert(event.locationInWindow, from: nil))
         if tools.tool == .laser { recordLaser() }
-        if activeTool.isOverlay || activeTool == .eraser { needsDisplay = true }
+        let tool = activeTool()
+        if tool.isOverlay || tool == .eraser { needsDisplay = true }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -332,7 +335,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         lastDragTime = event.timestamp
         if editingID != nil { endEditing() }
 
-        switch activeTool {
+        switch activeTool(event) {
         case .pen:
             drag = .drawing([StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))])
         case .eraser:
