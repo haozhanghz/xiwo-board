@@ -11,9 +11,9 @@ private let log = Logger(subsystem: "io.github.haozhanghz.xiwoboard", category: 
 /// signature and version, swap the app bundle and reopen. A copy that runs from
 /// a read-only place cannot be swapped, so its update goes to /Applications.
 ///
-/// The app is ad-hoc signed, so there is no Sparkle-style signature to check;
-/// the published `.sha256` and `codesign --verify` guard against a corrupt or
-/// truncated download.
+/// Releases are signed with the project's own certificate (docs/SIGNING.md), not
+/// a Developer ID, so there is no Sparkle-style signature to check; the published
+/// `.sha256` and `codesign --verify` guard against a corrupt or truncated download.
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()

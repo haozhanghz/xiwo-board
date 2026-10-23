@@ -28,6 +28,19 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Signing certificate
+        env:
+          XIWOBOARD_SIGNING_P12: ${{ secrets.XIWOBOARD_SIGNING_P12 }}
+        run: |
+          if [ -n "$XIWOBOARD_SIGNING_P12" ]; then
+            ./scripts/import-signing-identity.sh >> "$GITHUB_ENV"
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "::warning::No XIWOBOARD_SIGNING_P12 secret for this build; the app is ad-hoc signed."
+          else
+            echo "::error::The XIWOBOARD_SIGNING_P12 secret is missing. Releases must carry the project certificate, or macOS drops screen-recording permission on every update (docs/SIGNING.md)."
+            exit 1
+          fi
+
       - name: Build app
         run: ./scripts/build-app.sh
 

@@ -238,6 +238,7 @@ final class LectureRecorder: NSObject, ObservableObject {
         let a = NSAlert()
         a.messageText = "需要「录屏与系统录音」权限"
         a.informativeText = "请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中打开 XiwoBoard，然后退出并重新打开 XiwoBoard，再开始录制。"
+            + "如果那里的 XiwoBoard 已经打开了（从旧版本更新后会这样），先选中它点「−」删掉，再退出并重新打开 XiwoBoard，开始录制时重新允许。"
         a.addButton(withTitle: "打开系统设置")
         a.addButton(withTitle: "取消")
         if a.runModal() == .alertFirstButtonReturn { openPrivacySettings("Privacy_ScreenCapture") }
