@@ -9,6 +9,8 @@ import XiwoCore
 enum InkBenchmark {
     static func runIfRequested() -> Bool {
         guard CommandLine.arguments.contains("--ink-bench") else { return false }
+        NSApp.setActivationPolicy(.prohibited)
+        NSApp.windows.forEach { $0.orderOut(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated {
                 NSApp.windows.forEach { $0.orderOut(nil) }
