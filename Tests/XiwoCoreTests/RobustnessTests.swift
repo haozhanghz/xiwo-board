@@ -117,14 +117,15 @@ final class RobustnessTests: XCTestCase {
         XCTAssertThrowsError(try CoursewareArchive.decode(archive(cw)))
     }
 
-    func testArchiveReportsMissingResourceFiles() throws {
+    func testArchiveOpensWithoutMissingResourceFilesAndNamesThem() throws {
         var cw = Courseware()
-        cw.addResource(data: Data("image".utf8), name: "missing.png", ext: "png")
-        XCTAssertThrowsError(try CoursewareArchive.decode(archive(cw))) { error in
-            guard case CoursewareArchive.ArchiveError.missingResource("missing.png") = error else {
-                return XCTFail("Unexpected error: \(error)")
-            }
-        }
+        let key = cw.addResource(data: Data("image".utf8), name: "missing.png", ext: "png")
+        cw.slides[0].elements.append(BoardElement(frame: CGRect(x: 0, y: 0, width: 100, height: 100),
+                                                  content: .image(ImageSpec(resource: key))))
+        let (loaded, missing) = try CoursewareArchive.load(archive(cw))
+        XCTAssertEqual(missing, ["missing.png"])
+        XCTAssertNil(loaded.resources[key])
+        XCTAssertEqual(loaded.slides[0].elements.count, 1)
     }
 
     func testCaptureDimensionsFitLandscapePortraitAndUltrawideScreens() {

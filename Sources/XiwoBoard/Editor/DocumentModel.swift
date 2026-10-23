@@ -381,9 +381,9 @@ final class DocumentModel: ObservableObject {
             RecentFiles.add(url)
             return (DocumentModel(courseware: cw), warnings)
         default:
-            let cw = try CoursewareArchive.decode(Data(contentsOf: url))
+            let (cw, missing) = try CoursewareArchive.load(Data(contentsOf: url))
             RecentFiles.add(url)
-            return (DocumentModel(courseware: cw, fileURL: url), [])
+            return (DocumentModel(courseware: cw, fileURL: url), missing.map { "资源缺失：\($0)" })
         }
     }
 }

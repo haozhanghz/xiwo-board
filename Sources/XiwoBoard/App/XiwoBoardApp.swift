@@ -87,9 +87,9 @@ final class AppModel: ObservableObject {
             document = doc
             if !warnings.isEmpty {
                 let a = NSAlert()
-                a.messageText = "课件已导入"
+                a.messageText = url.pathExtension.lowercased() == "enbx" ? "课件已导入" : "课件已打开"
                 let unique = Array(Set(warnings)).sorted()
-                a.informativeText = "部分内容暂不支持，已跳过：\n" + unique.prefix(8).joined(separator: "\n")
+                a.informativeText = "部分内容无法载入，已跳过：\n" + unique.prefix(8).joined(separator: "\n")
                 a.runModal()
             }
         } catch {

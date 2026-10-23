@@ -10,13 +10,11 @@ public enum CoursewareArchive {
     public enum ArchiveError: LocalizedError {
         case unsupportedVersion(Int)
         case invalidDocument
-        case missingResource(String)
 
         public var errorDescription: String? {
             switch self {
             case .unsupportedVersion(let version): return "课件格式版本（\(version)）暂不支持，请更新 XiwoBoard。"
             case .invalidDocument: return "课件内容无效：请检查页面、尺寸或表格数据。"
-            case .missingResource(let name): return "课件中的资源缺失：\(name)"
             }
         }
     }
@@ -54,6 +52,13 @@ public enum CoursewareArchive {
     }
 
     public static func decode(_ data: Data) throws -> Courseware {
+        try load(data).courseware
+    }
+
+    /// Decodes the archive and names the resources that are missing or damaged in it.
+    /// Those are left out, so the rest of the courseware still opens; the elements
+    /// that used them draw a placeholder.
+    public static func load(_ data: Data) throws -> (courseware: Courseware, missing: [String]) {
         let zip = try ZipReader(data: data)
         guard let json = try zip.read(manifestName) else { throw ZipError.corrupt(manifestName) }
         let decoder = JSONDecoder()
@@ -64,13 +69,12 @@ public enum CoursewareArchive {
         guard !cw.slides.isEmpty, cw.slideSize.width.isFinite, cw.slideSize.height.isFinite,
               cw.slideSize.width > 0, cw.slideSize.height > 0,
               cw.slides.allSatisfy({ $0.elements.allSatisfy(validElement) }) else { throw ArchiveError.invalidDocument }
-        for (key, info) in manifest.resources {
-            guard let d = try zip.read("resources/\(key).\(info.ext)") else {
-                throw ArchiveError.missingResource(info.name)
-            }
+        var missing: [String] = []
+        for (key, info) in manifest.resources.sorted(by: { $0.key < $1.key }) {
+            guard let d = try? zip.read("resources/\(key).\(info.ext)") else { missing.append(info.name); continue }
             cw.resources[key] = Resource(name: info.name, ext: info.ext, data: d)
         }
-        return cw
+        return (cw, missing)
     }
 
     private static func validElement(_ element: BoardElement) -> Bool {
