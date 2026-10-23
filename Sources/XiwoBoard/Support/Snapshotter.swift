@@ -42,6 +42,14 @@ enum Snapshotter {
                size: nil, to: dir.appendingPathComponent("present-toolbar.png"))
         render(PresentationToolbar(presenter: presenter, maxWidth: 1000).environmentObject(app.tools).environmentObject(app.recorder),
                size: nil, to: dir.appendingPathComponent("present-toolbar-1000.png"))
+        // While recording, and while paused, the toolbar and the handle carry a pause button.
+        for (state, name) in [(LectureRecorder.State.recording, "recording"), (.paused, "paused")] {
+            app.recorder.preview(state, elapsed: 754)
+            render(PresentationToolbar(presenter: presenter, maxWidth: 1900).environmentObject(app.tools).environmentObject(app.recorder),
+                   size: nil, to: dir.appendingPathComponent("present-toolbar-\(name).png"))
+            render(ChromeHandle(presenter: presenter), size: nil, to: dir.appendingPathComponent("handle-\(name).png"))
+        }
+        app.recorder.preview(.idle, elapsed: 0)
         render(RecordingOptions(presenter: presenter).environmentObject(app.recorder).padding(14)
                 .background(Color(white: 0.2)).environment(\.colorScheme, .dark),
                size: nil, to: dir.appendingPathComponent("record-options.png"))
