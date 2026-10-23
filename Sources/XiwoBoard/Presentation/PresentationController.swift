@@ -534,7 +534,8 @@ struct RecordingOptions: View {
             Toggle("只录课件（隐藏工具栏、计时器等功能页面）", isOn: $recorder.coursewareOnly)
             Toggle("录制麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
             Toggle("录制电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
-            Text("视频保存在「影片 › XiwoBoard 录课」。录制中再点一次「录制」按钮即可停止。")
+            Toggle("录制鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
+            Text("视频保存在「影片 › XiwoBoard 录课」。录制中再点一次「录制」按钮即可停止。不录鼠标指针时，可以用激光笔在视频里指示。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

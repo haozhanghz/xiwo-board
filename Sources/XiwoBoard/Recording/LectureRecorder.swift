@@ -27,6 +27,9 @@ final class LectureRecorder: NSObject, ObservableObject {
     @Published var coursewareOnly = true { didSet { if oldValue != coursewareOnly { refreshFilter() } } }
     @Published var recordMicrophone = true
     @Published var recordSystemAudio = false
+    /// Off by default so the pointer stays out of the video. The laser pointer is drawn
+    /// on the slide itself, so pointing at things still shows up.
+    @Published var recordCursor = false
 
     private var stream: SCStream?
     private var output: SCRecordingOutput?
@@ -60,7 +63,7 @@ final class LectureRecorder: NSObject, ObservableObject {
         }
         targetWindow = window
         chromeWindows = chrome
-        log.info("Start requested (mic: \(self.recordMicrophone), system audio: \(self.recordSystemAudio), courseware only: \(self.coursewareOnly))")
+        log.info("Start requested (mic: \(self.recordMicrophone), system audio: \(self.recordSystemAudio), cursor: \(self.recordCursor), courseware only: \(self.coursewareOnly))")
 
         guard Self.ensureScreenAccess(), await ensureMicrophoneAccess(), !stopRequested else {
             state = .idle
@@ -76,7 +79,7 @@ final class LectureRecorder: NSObject, ObservableObject {
             config.width = size.width
             config.height = size.height
             config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
-            config.showsCursor = true
+            config.showsCursor = recordCursor
             config.queueDepth = 6
             config.capturesAudio = recordSystemAudio
             config.excludesCurrentProcessAudio = false
