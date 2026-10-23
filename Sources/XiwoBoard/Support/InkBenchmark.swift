@@ -28,19 +28,23 @@ enum InkBenchmark {
         var ups: [Double] = []
         var drawnPixels: Double = 0
         var draws = 0
+        var drawTime: Double = 0
+        var commitTime: Double = 0
     }
 
     static func run() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
         print("screen \(Int(screen.frame.width))×\(Int(screen.frame.height)) @\(screen.backingScaleFactor)x")
+        pageRender(pixelWidth: Int(screen.frame.width * screen.backingScaleFactor))
         for (mode, size) in [(BoardCanvasView.Mode.present, screen.frame.size), (.edit, CGSize(width: 1200, height: 760))] {
             for kind in PenKind.allCases {
                 let s = bench(mode: mode, size: size, kind: kind, scale: screen.backingScaleFactor)
                 let area = size.width * size.height
-                print(String(format: "%@ %-11@ move avg %.2f p95 %.2f max %.2f ms | pen-up avg %.2f max %.2f ms | %.0f%% of view per draw",
+                print(String(format: "%@ %-11@ move avg %.2f p95 %.2f max %.2f ms | pen-up avg %.2f max %.2f ms | %.0f%% of view, %.2f ms per draw, %.2f ms CA commit per frame",
                              mode == .present ? "present" : "edit   ", kind.rawValue,
                              avg(s.moves), pct(s.moves, 0.95), s.moves.max() ?? 0, avg(s.ups), s.ups.max() ?? 0,
-                             s.draws > 0 ? 100 * s.drawnPixels / Double(s.draws) / area : 0))
+                             s.draws > 0 ? 100 * s.drawnPixels / Double(s.draws) / area : 0,
+                             s.draws > 0 ? s.drawTime / Double(s.draws) : 0, s.commitTime / Double(max(1, s.moves.count + s.ups.count))))
             }
         }
     }
@@ -62,7 +66,8 @@ enum InkBenchmark {
         flush(canvas)
 
         var stats = Stats()
-        canvas.drawObserver = { rect, _ in stats.drawnPixels += rect.width * rect.height; stats.draws += 1 }
+        flushTime = 0
+        canvas.drawObserver = { rect, t in stats.drawnPixels += rect.width * rect.height; stats.draws += 1; stats.drawTime += t * 1000 }
         var clock = ProcessInfo.processInfo.systemUptime
         for stroke in handwriting() {
             func event(_ type: NSEvent.EventType, _ p: CGPoint) -> NSEvent {
@@ -85,12 +90,35 @@ enum InkBenchmark {
             flush(canvas)
             stats.ups.append((CACurrentMediaTime() - t) * 1000)
         }
+        stats.commitTime = flushTime
         return stats
     }
 
+    /// Cost of putting one new stroke on the cached page: patching vs rendering it again.
+    static func pageRender(pixelWidth: Int) {
+        let cw = busySlide()
+        let old = cw.slides[0]
+        guard let base = SlideRenderer.image(of: old, courseware: cw, pixelWidth: pixelWidth) else { return }
+        var full: [Double] = [], patch: [Double] = []
+        for (i, stroke) in handwriting().prefix(40).enumerated() {
+            var new = old
+            new.elements.append(.stroke(points: stroke.map { StrokePoint(x: $0.x, y: $0.y) }, color: .red, width: 4, kind: .pen))
+            var t = CACurrentMediaTime()
+            _ = SlideRenderer.image(of: new, courseware: cw, pixelWidth: pixelWidth)
+            if i > 0 { full.append((CACurrentMediaTime() - t) * 1000) }
+            t = CACurrentMediaTime()
+            _ = SlideRenderer.image(updating: base, from: old, to: new, courseware: cw)
+            if i > 0 { patch.append((CACurrentMediaTime() - t) * 1000) }
+        }
+        print(String(format: "page %d px wide: full render avg %.2f ms, patch avg %.2f ms", pixelWidth, avg(full), avg(patch)))
+    }
+
+    private static var flushTime: Double = 0
     private static func flush(_ v: NSView) {
         v.displayIfNeeded()
+        let t = CACurrentMediaTime()
         CATransaction.flush()
+        flushTime += (CACurrentMediaTime() - t) * 1000
     }
 
     /// A page that has been taught on for a while: photo, text, a grid and lots of ink.
