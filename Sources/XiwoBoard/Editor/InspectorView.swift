@@ -88,21 +88,29 @@ struct NotesEditor: View {
     @ObservedObject var doc: DocumentModel
     @State private var text = ""
     @State private var slideID = ""
+    @State private var hasUndoPoint = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         TextEditor(text: $text)
+            .focused($focused)
             .font(.body)
             .frame(height: 120)
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(.gray.opacity(0.3)))
             .onAppear(perform: load)
             .onChange(of: doc.slide.id) { _, _ in load() }
+            .onChange(of: doc.slide.notes) { _, notes in
+                if text != notes { text = notes; hasUndoPoint = false }
+            }
+            .onChange(of: focused) { _, _ in hasUndoPoint = false }
             .onChange(of: text) { _, t in
                 guard slideID == doc.slide.id, t != doc.slide.notes else { return }
+                if !hasUndoPoint { doc.beginGesture(); hasUndoPoint = true }
                 doc.editSlideLive { $0.notes = t }
             }
     }
 
-    private func load() { slideID = doc.slide.id; text = doc.slide.notes }
+    private func load() { slideID = doc.slide.id; text = doc.slide.notes; hasUndoPoint = false }
 }
 
 struct ElementInspector: View {
@@ -159,7 +167,7 @@ struct ElementInspector: View {
 
     private func iconButton(_ icon: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon).frame(width: 22, height: 20) }
-            .buttonStyle(.borderless).help(help)
+            .buttonStyle(.borderless).help(help).accessibilityLabel(help)
     }
 
     @ViewBuilder private var geometry: some View {
@@ -183,7 +191,16 @@ struct ElementInspector: View {
     @ViewBuilder private var styleSection: some View {
         switch first.content {
         case .text(let t):
-            InspectorSection(title: "文字") { TextStyleEditor(spec: t) { new in doc.update(first.id) { $0.content = .text(new) } } }
+            InspectorSection(title: "文字") {
+                TextStyleEditor(spec: t) { new in
+                    doc.update(first.id) { e in
+                        guard case .text(let current) = e.content else { return }
+                        var styled = new
+                        styled.text = current.text
+                        e.content = .text(styled)
+                    }
+                }
+            }
         case .shape(let s):
             InspectorSection(title: "形状样式") {
                 ShapeStyleEditor(style: s.style) { st in
@@ -248,15 +265,19 @@ struct NumberField: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
-            TextField("", text: $text, onCommit: { if let v = Double(text) { commit(v) } })
+            TextField("", text: $text, onCommit: {
+                if let v = Double(text), v.isFinite { commit(v) }
+                text = format(value)
+            })
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 72)
+                .accessibilityLabel(label)
         }
         .onAppear { text = format(value) }
         .onChange(of: value) { _, v in text = format(v) }
     }
 
-    private func format(_ v: Double) -> String { String(Int(v.rounded())) }
+    private func format(_ v: Double) -> String { v.isFinite ? String(format: "%.0f", v) : "0" }
 }
 
 struct TextStyleEditor: View {

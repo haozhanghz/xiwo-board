@@ -37,7 +37,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private enum Drag {
         case none
         case drawing
-        case erasing
+        case erasing(hasUndo: Bool)
         case moving(last: CGPoint, moved: Bool)
         case resizing(handle: Handle, original: BoardElement, start: CGPoint)
         case rotating(original: BoardElement)
@@ -369,8 +369,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             setNeedsDisplay(liveInkDirtyRect())
             return
         case .eraser:
-            document.beginGesture()
-            drag = .erasing
+            drag = .erasing(hasUndo: false)
             erase(at: p)
         case .laser:
             drag = .laser
@@ -550,8 +549,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             if editingID != nil { endEditing() }
             let p = toSlide(convert(event.locationInWindow, from: nil))
             pointer = p
-            document.beginGesture()
-            drag = .erasing
+            drag = .erasing(hasUndo: false)
             erase(at: p)
             needsDisplay = true
             return
@@ -720,22 +718,27 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         let mode = tools.eraserMode
         let present = self.mode == .present
         var reveal: [String] = []
-        document.editSlideLive { s in
-            var out: [BoardElement] = []
-            for e in s.elements {
-                guard e.isStroke else {
-                    if present, e.masked, e.frame.insetBy(dx: -r, dy: -r).contains(p) { reveal.append(e.id) }
-                    out.append(e); continue
-                }
-                if mode == .stroke {
-                    if !e.hitTest(p, tolerance: r) { out.append(e) }
-                } else {
-                    out.append(contentsOf: e.erasing(center: p, radius: r))
-                }
+        var out: [BoardElement] = []
+        let original = document.slide.elements
+        for e in original {
+            guard e.isStroke && !e.locked else {
+                if present, e.masked, e.hitTest(p, tolerance: r) { reveal.append(e.id) }
+                out.append(e); continue
             }
-            s.elements = out
+            if mode == .stroke {
+                if !e.hitTest(p, tolerance: r) { out.append(e) }
+            } else {
+                out.append(contentsOf: e.erasing(center: p, radius: r))
+            }
         }
-        if !reveal.isEmpty { revealedMasks.formUnion(reveal) }
+        if out != original {
+            if case .erasing(let hasUndo) = drag, !hasUndo {
+                document.beginGesture()
+                drag = .erasing(hasUndo: true)
+            }
+            document.editSlideLive { $0.elements = out }
+        }
+        if !reveal.isEmpty, !Set(reveal).isSubset(of: revealedMasks) { revealedMasks.formUnion(reveal) }
     }
 
     private func recordLaser() {
@@ -764,6 +767,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     // MARK: In-place text editing
 
     func beginEditing(_ id: String, at point: CGPoint? = nil) {
+        document.finishEditing()
         guard let e = document.slide.element(id: id), !e.locked else { return }
         endEditing()
         var spec: TextSpec
@@ -791,6 +795,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         let tv = NSTextView(frame: toView(rect).insetBy(dx: 2, dy: 0))
         tv.delegate = self
         tv.isRichText = false
+        tv.allowsUndo = true
         tv.drawsBackground = true
         tv.backgroundColor = NSColor.white.withAlphaComponent(0.92)
         tv.font = NSFont(name: spec.fontName, size: spec.fontSize * scale) ?? .systemFont(ofSize: spec.fontSize * scale)
@@ -806,11 +811,13 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(tv)
         tv.selectAll(nil)
         editor = tv
+        document.commitPendingEditing = { [weak self] in self?.endEditing() }
         invalidateCache()
     }
 
     func endEditing() {
         guard let tv = editor, let id = editingID else { return }
+        document.commitPendingEditing = nil
         let text = tv.string
         let cell = editingCell
         editor = nil

@@ -16,6 +16,7 @@ let package = Package(
             dependencies: ["XiwoCore"]
         ),
         .testTarget(name: "XiwoCoreTests", dependencies: ["XiwoCore"]),
+        .testTarget(name: "XiwoBoardTests", dependencies: ["XiwoBoard", "XiwoCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

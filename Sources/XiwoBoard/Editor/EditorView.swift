@@ -44,6 +44,11 @@ struct CanvasHost: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: BoardCanvasView, context: Context) { nsView.needsDisplay = true }
+
+    static func dismantleNSView(_ nsView: BoardCanvasView, coordinator: ()) {
+        nsView.endEditing()
+        MediaPlayerOverlay.stop(in: nsView)
+    }
 }
 
 struct StatusBar: View {
@@ -75,6 +80,7 @@ struct SlideSidebar: View {
             List {
                 ForEach(Array(doc.courseware.slides.enumerated()), id: \.element.id) { index, slide in
                     SlideThumbnailRow(index: index, slide: slide, courseware: doc.courseware, selected: index == doc.currentIndex)
+                        .equatable()
                         .contentShape(Rectangle())
                         .onTapGesture { doc.go(to: index) }
                         .contextMenu {
