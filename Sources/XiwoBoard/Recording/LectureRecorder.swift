@@ -1,0 +1,193 @@
+import AVFoundation
+import AppKit
+import CoreMedia
+import ScreenCaptureKit
+
+/// Records the lecture (录屏讲课) with ScreenCaptureKit: the presentation screen,
+/// the microphone and optionally system audio, written straight to an MP4 by
+/// `SCRecordingOutput`.
+///
+/// When `coursewareOnly` is on, the presenter's own panels (toolbar, page list,
+/// timer…) are left out of the capture, so the video shows only the courseware
+/// and the teacher's ink, while the teacher still sees and uses the tools.
+@MainActor
+final class LectureRecorder: NSObject, ObservableObject {
+    enum State: Equatable { case idle, starting, recording, stopping }
+
+    @Published private(set) var state: State = .idle
+    @Published private(set) var elapsed: TimeInterval = 0
+    @Published private(set) var lastRecording: URL?
+    @Published var coursewareOnly = true { didSet { if oldValue != coursewareOnly { refreshFilter() } } }
+    @Published var recordMicrophone = true
+    @Published var recordSystemAudio = false
+
+    private var stream: SCStream?
+    private var output: SCRecordingOutput?
+    private var timer: Timer?
+    private var startDate: Date?
+    private weak var targetWindow: NSWindow?
+    private var chromeWindows: () -> [NSWindow] = { [] }
+    private let frameSink = FrameSink()
+    private var outputURL: URL?
+
+    var isRecording: Bool { state == .recording }
+
+    /// Starts recording the screen that shows `window`.
+    /// `chrome` returns the tool windows to hide when `coursewareOnly` is on.
+    func start(window: NSWindow, title: String, chrome: @escaping () -> [NSWindow]) async {
+        guard state == .idle else { return }
+        state = .starting
+        targetWindow = window
+        chromeWindows = chrome
+        do {
+            if !CGPreflightScreenCaptureAccess() {
+                CGRequestScreenCaptureAccess()
+            }
+            if recordMicrophone {
+                let ok = await AVCaptureDevice.requestAccess(for: .audio)
+                if !ok { recordMicrophone = false }
+            }
+            let (filter, display) = try await makeFilter()
+            let config = SCStreamConfiguration()
+            let scale = window.screen?.backingScaleFactor ?? 2
+            config.width = Int(Double(display.width) * scale)
+            config.height = Int(Double(display.height) * scale)
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            config.showsCursor = true
+            config.queueDepth = 6
+            config.capturesAudio = recordSystemAudio
+            config.excludesCurrentProcessAudio = false
+            config.captureMicrophone = recordMicrophone
+            if recordMicrophone { config.microphoneCaptureDeviceID = AVCaptureDevice.default(for: .audio)?.uniqueID }
+
+            let url = Self.makeOutputURL(title: title)
+            let rc = SCRecordingOutputConfiguration()
+            rc.outputURL = url
+            rc.outputFileType = .mp4
+            rc.videoCodecType = .h264
+            let rec = SCRecordingOutput(configuration: rc, delegate: self)
+
+            let s = SCStream(filter: filter, configuration: config, delegate: self)
+            try s.addStreamOutput(frameSink, type: .screen, sampleHandlerQueue: frameSink.queue)
+            try s.addRecordingOutput(rec)
+            try await s.startCapture()
+            stream = s
+            output = rec
+            outputURL = url
+            startDate = Date()
+            elapsed = 0
+            state = .recording
+            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let d = self.startDate else { return }
+                    self.elapsed = Date().timeIntervalSince(d)
+                }
+            }
+        } catch {
+            state = .idle
+            stream = nil
+            output = nil
+            Self.report(error)
+        }
+    }
+
+    func stop() async {
+        guard state == .recording, let s = stream else { return }
+        state = .stopping
+        timer?.invalidate(); timer = nil
+        do { try await s.stopCapture() } catch { Self.report(error) }
+        if let output { try? s.removeRecordingOutput(output) }
+        stream = nil
+        output = nil
+        state = .idle
+        if let url = outputURL {
+            lastRecording = url
+            // The file is finalised asynchronously; reveal it once it is on disk.
+            for _ in 0..<20 where !FileManager.default.fileExists(atPath: url.path) {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    /// Re-applies the filter, e.g. after the tool panels change or `coursewareOnly` flips.
+    func refreshFilter() {
+        guard let stream, state == .recording else { return }
+        Task {
+            guard let (filter, _) = try? await makeFilter() else { return }
+            try? await stream.updateContentFilter(filter)
+        }
+    }
+
+    private func makeFilter() async throws -> (SCContentFilter, SCDisplay) {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let screenID = (targetWindow?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        guard let display = content.displays.first(where: { $0.displayID == screenID }) ?? content.displays.first else {
+            throw RecorderError.noDisplay
+        }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let apps = content.applications.filter { $0.processID == pid }
+        var excluded: [SCWindow] = []
+        if coursewareOnly {
+            let ids = Set(chromeWindows().filter(\.isVisible).map { CGWindowID($0.windowNumber) })
+            excluded = content.windows.filter { ids.contains($0.windowID) }
+        }
+        // Capture only our own windows so notifications and other apps stay out of the lecture.
+        let filter = apps.isEmpty
+            ? SCContentFilter(display: display, excludingWindows: excluded)
+            : SCContentFilter(display: display, including: apps, exceptingWindows: excluded)
+        return (filter, display)
+    }
+
+    static func makeOutputURL(title: String) -> URL {
+        let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let dir = movies.appendingPathComponent("XiwoBoard 录课", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let safe = title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        return dir.appendingPathComponent("\(safe) \(f.string(from: Date())).mp4")
+    }
+
+    static func report(_ error: Error) {
+        let a = NSAlert()
+        a.messageText = "录制失败"
+        a.informativeText = error.localizedDescription
+            + "\n\n如果是首次录制，请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中允许 XiwoBoard，然后重新打开应用。"
+        a.runModal()
+    }
+
+    enum RecorderError: LocalizedError {
+        case noDisplay
+        var errorDescription: String? { "找不到可录制的屏幕" }
+    }
+
+    static func format(_ t: TimeInterval) -> String {
+        let s = Int(t)
+        return String(format: "%02d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+    }
+}
+
+extension LectureRecorder: SCStreamDelegate, SCRecordingOutputDelegate {
+    nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
+        Task { @MainActor in
+            self.timer?.invalidate(); self.timer = nil
+            self.stream = nil
+            self.output = nil
+            self.state = .idle
+            Self.report(error)
+        }
+    }
+
+    nonisolated func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
+        Task { @MainActor in Self.report(error) }
+    }
+}
+
+/// Screen frames go to the recording output; this sink only satisfies the
+/// stream's requirement for a screen output.
+final class FrameSink: NSObject, SCStreamOutput {
+    let queue = DispatchQueue(label: "xiwo.recorder.frames")
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
+}
