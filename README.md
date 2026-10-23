@@ -26,6 +26,8 @@
 应用没有经过 Apple 公证，第一次打开会被系统拦下。可以在「系统设置 › 隐私与安全性」底部点「仍要打开」，
 或者在终端运行 `xattr -cr /Applications/XiwoBoard.app`。需要 Apple 芯片和 macOS 15 及以上。
 
+以后的新版本可以在应用里更新：菜单「XiwoBoard › 检查更新…」或首页左下角的「检查更新」。
+
 ## 构建
 
 需要 macOS 15 及以上、Xcode 16 及以上（在 Xcode 27 / macOS 27 上验证）。

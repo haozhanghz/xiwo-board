@@ -1,6 +1,22 @@
 import SwiftUI
 import XiwoCore
 
+/// How much room ribbon buttons take; the editor toolbar steps down as the window narrows.
+enum RibbonDensity {
+    case regular, tight, iconOnly
+}
+
+private struct RibbonDensityKey: EnvironmentKey {
+    static let defaultValue = RibbonDensity.regular
+}
+
+extension EnvironmentValues {
+    var ribbonDensity: RibbonDensity {
+        get { self[RibbonDensityKey.self] }
+        set { self[RibbonDensityKey.self] = newValue }
+    }
+}
+
 /// Big icon-over-label button used by the editor ribbon and presenter bar.
 struct RibbonButton: View {
     let title: String
@@ -8,20 +24,24 @@ struct RibbonButton: View {
     var active = false
     var tint: Color? = nil
     let action: () -> Void
+    @Environment(\.ribbonDensity) private var density
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: systemImage).font(.system(size: 17, weight: .medium)).frame(height: 20)
-                Text(title).font(.system(size: 11))
+                if density != .iconOnly {
+                    Text(title).font(.system(size: 11)).fixedSize()
+                }
             }
-            .frame(minWidth: 46)
-            .padding(.vertical, 5).padding(.horizontal, 4)
+            .frame(minWidth: density == .regular ? 46 : 28, minHeight: density == .iconOnly ? 34 : 0)
+            .padding(.vertical, 5).padding(.horizontal, density == .regular ? 4 : 2)
             .foregroundStyle(active ? Color.accentColor : (tint ?? Color.primary))
             .background(active ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(title)
     }
 }
 
@@ -73,10 +93,43 @@ struct EditorToolbar: View {
             TextField("课件名称", text: $title, onCommit: { doc.rename(title) })
                 .textFieldStyle(.plain)
                 .font(.headline)
-                .frame(width: 150)
+                .frame(width: 140)
                 .onAppear { title = doc.title }
                 .onChange(of: doc.title) { _, t in title = t }
 
+            // Labels shrink, then disappear, so 授课 stays visible in narrow windows.
+            ViewThatFits(in: .horizontal) {
+                toolButtons.environment(\.ribbonDensity, .regular)
+                toolButtons.environment(\.ribbonDensity, .tight)
+                toolButtons.environment(\.ribbonDensity, .iconOnly)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    toolButtons.environment(\.ribbonDensity, .iconOnly)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 8)
+
+            Menu {
+                Button("从当前页开始") { app.startPresentation() }
+                Button("从第一页开始") { app.startPresentation(fromBeginning: true) }
+            } label: {
+                Label("授课", systemImage: "play.rectangle.fill")
+                    .font(.headline)
+            } primaryAction: {
+                app.startPresentation()
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .fixedSize()
+            .padding(.trailing, 12)
+        }
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private var toolButtons: some View {
+        HStack(spacing: 2) {
             RibbonButton(title: "撤销", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
             RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
             divider
@@ -101,24 +154,8 @@ struct EditorToolbar: View {
                 doc.updateSelected { $0.masked = !all }
             }
             .disabled(doc.selection.isEmpty)
-            Spacer(minLength: 8)
-            Menu {
-                Button("从当前页开始") { app.startPresentation() }
-                Button("从第一页开始") { app.startPresentation(fromBeginning: true) }
-            } label: {
-                Label("授课", systemImage: "play.rectangle.fill")
-                    .font(.headline)
-            } primaryAction: {
-                app.startPresentation()
-            }
-            .menuStyle(.button)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .fixedSize()
-            .padding(.trailing, 12)
         }
-        .padding(.vertical, 6)
-        .background(.bar)
+        .fixedSize()
     }
 
     private var divider: some View { Divider().frame(height: 34).padding(.horizontal, 4) }

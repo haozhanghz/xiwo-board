@@ -27,6 +27,18 @@ final class XiwoCoreTests: XCTestCase {
         XCTAssertEqual(r.entry("dir/大文件.xml")?.crc, CRC32.checksum(big))
     }
 
+    func testAppVersionOrdering() throws {
+        let v = try XCTUnwrap(AppVersion("v0.1.1"))
+        XCTAssertEqual(v.description, "0.1.1")
+        XCTAssertLessThan(try XCTUnwrap(AppVersion("0.1.0")), v)
+        XCTAssertLessThan(v, try XCTUnwrap(AppVersion("0.2")))
+        XCTAssertLessThan(try XCTUnwrap(AppVersion("0.9.9")), try XCTUnwrap(AppVersion("0.10.0")))
+        XCTAssertEqual(try XCTUnwrap(AppVersion("1.0")), try XCTUnwrap(AppVersion("1.0.0")))
+        XCTAssertEqual(try XCTUnwrap(AppVersion("1.2.0-beta")), try XCTUnwrap(AppVersion("1.2")))
+        XCTAssertNil(AppVersion("latest"))
+        XCTAssertNil(AppVersion("1..2"))
+    }
+
     func testCRC32() {
         XCTAssertEqual(CRC32.checksum(Data("123456789".utf8)), 0xCBF4_3926)
     }
