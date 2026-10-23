@@ -1,7 +1,6 @@
 import AppKit
 import CryptoKit
 import OSLog
-import Security
 import SwiftUI
 import XiwoCore
 
@@ -43,14 +42,9 @@ final class Updater: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .idle
-    /// The last failure was GitHub refusing access, which a token can fix.
-    @Published private(set) var needsToken = false
 
     @Published var autoCheck = Defaults.bool(Keys.autoCheck, default: true) {
         didSet { UserDefaults.standard.set(autoCheck, forKey: Keys.autoCheck) }
-    }
-    @Published private(set) var hasToken = UserDefaults.standard.bool(forKey: Keys.hasToken) {
-        didSet { UserDefaults.standard.set(hasToken, forKey: Keys.hasToken) }
     }
     private var skippedVersion: String {
         get { UserDefaults.standard.string(forKey: Keys.skippedVersion) ?? "" }
@@ -63,7 +57,6 @@ final class Updater: ObservableObject {
 
     private enum Keys {
         static let autoCheck = "updates.autoCheck"
-        static let hasToken = "updates.hasToken"
         static let skippedVersion = "updates.skippedVersion"
         static let lastCheck = "updates.lastCheck"
     }
@@ -75,7 +68,6 @@ final class Updater: ObservableObject {
     }
 
     private var stagedApp: URL?
-    private var cachedToken: String?
 
     var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
@@ -95,7 +87,6 @@ final class Updater: ObservableObject {
         default: break
         }
         phase = .checking
-        needsToken = false
         do {
             let release = try await fetchLatest()
             lastCheck = Date().timeIntervalSince1970
@@ -111,7 +102,6 @@ final class Updater: ObservableObject {
             if !userInitiated { UpdateWindow.show() }
         } catch {
             log.error("Update check failed: \(String(describing: error), privacy: .public)")
-            if let e = error as? UpdateError, case .noAccess = e { needsToken = true }
             phase = userInitiated ? .failed(error.localizedDescription) : .idle
         }
     }
@@ -127,12 +117,11 @@ final class Updater: ObservableObject {
     private func fetchLatest() async throws -> Release {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repository)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        authorize(&request)
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         switch status {
         case 200: break
-        case 401, 403, 404: throw UpdateError.noAccess(hasToken: hasToken)
+        case 403, 404: throw UpdateError.noAccess
         default: throw UpdateError.http(status)
         }
         let json = try JSONDecoder().decode(GitHubRelease.self, from: data)
@@ -211,8 +200,7 @@ final class Updater: ObservableObject {
     private func fetch(_ asset: Asset, to destination: URL) async throws {
         var request = URLRequest(url: asset.apiURL)
         request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-        authorize(&request)
-        let (file, response) = try await URLSession.shared.download(for: request, delegate: RedirectHandler())
+        let (file, response) = try await URLSession.shared.download(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw UpdateError.http(status) }
         try? FileManager.default.removeItem(at: destination)
@@ -237,24 +225,8 @@ final class Updater: ObservableObject {
         }
     }
 
-    // MARK: Access token
-
-    /// A GitHub token is only needed while the repository is private; it lives in the keychain.
-    func saveToken(_ token: String) {
-        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        TokenStore.save(t)
-        cachedToken = t.isEmpty ? nil : t
-        hasToken = !t.isEmpty
-    }
-
-    private func authorize(_ request: inout URLRequest) {
-        guard hasToken else { return }
-        if cachedToken == nil { cachedToken = TokenStore.read() }
-        if let t = cachedToken { request.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-    }
-
     enum UpdateError: LocalizedError {
-        case noAccess(hasToken: Bool)
+        case noAccess
         case http(Int)
         case noArchive
         case checksumMismatch
@@ -265,10 +237,8 @@ final class Updater: ObservableObject {
 
         var errorDescription: String? {
             switch self {
-            case .noAccess(let hasToken):
-                return hasToken
-                    ? "GitHub 拒绝了访问。请检查访问令牌是否有效、是否有这个仓库的读取权限。"
-                    : "无法访问发布页面。仓库是私有的，需要在下方填写 GitHub 访问令牌；也可能是 GitHub 的访问次数暂时超限。"
+            case .noAccess:
+                return "暂时无法访问 GitHub 的发布页面，可能是访问次数超限，请稍后再试。"
             case .http(let code): return "下载失败（HTTP \(code)）。"
             case .noArchive: return "最新版本里没有找到 Apple 芯片的安装包。"
             case .checksumMismatch: return "下载的文件校验不通过，可能下载不完整，请重试。"
@@ -295,42 +265,6 @@ private struct GitHubRelease: Decodable {
 private struct GitHubAsset: Decodable {
     let name: String
     let url: URL
-}
-
-/// GitHub answers an asset request with a redirect to a signed storage URL,
-/// which rejects requests that still carry the GitHub token.
-private final class RedirectHandler: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest) async -> URLRequest? {
-        var r = request
-        if r.url?.host != task.originalRequest?.url?.host { r.setValue(nil, forHTTPHeaderField: "Authorization") }
-        return r
-    }
-}
-
-private enum TokenStore {
-    static let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "io.github.haozhanghz.xiwoboard.github",
-        kSecAttrAccount as String: "release-token",
-    ]
-
-    static func read() -> String? {
-        var q = query
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func save(_ token: String) {
-        SecItemDelete(query as CFDictionary)
-        guard !token.isEmpty else { return }
-        var q = query
-        q[kSecValueData as String] = Data(token.utf8)
-        SecItemAdd(q as CFDictionary, nil)
-    }
 }
 
 // MARK: - Window
@@ -361,8 +295,6 @@ enum UpdateWindow {
 
 struct UpdateView: View {
     @EnvironmentObject var updater: Updater
-    @State private var tokenDraft = ""
-    @State private var showToken = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -376,23 +308,9 @@ struct UpdateView: View {
             status
             Divider()
             Toggle("启动时自动检查更新", isOn: $updater.autoCheck)
-            DisclosureGroup("GitHub 访问令牌（仓库为私有时需要）", isExpanded: $showToken) {
-                VStack(alignment: .leading, spacing: 8) {
-                    SecureField(updater.hasToken ? "已保存，输入新令牌可替换" : "粘贴令牌", text: $tokenDraft)
-                    HStack {
-                        Button("保存") { updater.saveToken(tokenDraft); tokenDraft = "" }.disabled(tokenDraft.isEmpty)
-                        Button("清除") { updater.saveToken(""); tokenDraft = "" }.disabled(!updater.hasToken)
-                    }
-                    Text("在 GitHub › Settings › Developer settings 创建细粒度令牌，只授予这个仓库的 Contents 只读权限。令牌保存在本机钥匙串里。")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, 6)
-            }
         }
         .padding(20)
         .frame(width: 460)
-        .onChange(of: updater.needsToken) { _, needs in if needs { showToken = true } }
     }
 
     @ViewBuilder private var status: some View {

@@ -27,7 +27,6 @@
 或者在终端运行 `xattr -cr /Applications/XiwoBoard.app`。需要 Apple 芯片和 macOS 15 及以上。
 
 以后的新版本可以在应用里更新：菜单「XiwoBoard › 检查更新…」或首页左下角的「检查更新」。
-仓库为私有时，需要在更新窗口里填一个只读的 GitHub 访问令牌。
 
 ## 构建
 
