@@ -48,13 +48,18 @@ public struct RenderOptions {
 /// Draws slides with Core Graphics. The context must already be set up in slide
 /// coordinates with the origin at the top-left and y growing downwards.
 public enum SlideRenderer {
-    public static func draw(_ slide: Slide, courseware: Courseware, in ctx: CGContext, options: RenderOptions = RenderOptions()) {
+    /// Draws the whole slide, or with `area` only the elements that can paint inside it.
+    public static func draw(_ slide: Slide, courseware: Courseware, in ctx: CGContext, options: RenderOptions = RenderOptions(),
+                            only area: CGRect? = nil) {
         drawBackground(slide.background, size: courseware.slideSize, courseware: courseware, in: ctx, cache: options.cache)
+        func shown(_ e: BoardElement) -> Bool {
+            !options.hidden.contains(e.id) && (area.map { paintBounds(of: e).intersects($0) } ?? true)
+        }
         // Highlighter ink sits under everything else so text stays readable.
-        for e in slide.elements where isHighlighter(e) && !options.hidden.contains(e.id) {
+        for e in slide.elements where isHighlighter(e) && shown(e) {
             draw(e, courseware: courseware, in: ctx, options: options)
         }
-        for e in slide.elements where !isHighlighter(e) && !options.hidden.contains(e.id) {
+        for e in slide.elements where !isHighlighter(e) && shown(e) {
             draw(e, courseware: courseware, in: ctx, options: options)
         }
     }

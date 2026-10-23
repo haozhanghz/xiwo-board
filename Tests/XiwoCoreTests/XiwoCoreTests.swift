@@ -159,6 +159,117 @@ final class XiwoCoreTests: XCTestCase {
         XCTAssertEqual(CGPDFDocument(CGDataProvider(data: pdf as CFData)!)?.numberOfPages, 2)
     }
 
+    func testChangedRegion() {
+        let slide = sampleCourseware().slides[0]
+        XCTAssertEqual(SlideRenderer.changedRegion(from: slide, to: slide), .null)
+        var inked = slide
+        inked.elements.append(.stroke(points: [StrokePoint(x: 600, y: 500), StrokePoint(x: 700, y: 560)], color: .red, width: 4, kind: .pen))
+        let r = SlideRenderer.changedRegion(from: slide, to: inked)
+        XCTAssertNotNil(r)
+        XCTAssertTrue(r!.contains(CGRect(x: 600, y: 500, width: 100, height: 60)))
+        XCTAssertLessThan(r!.width, 120)
+        var restacked = slide
+        restacked.elements.swapAt(0, 1)
+        XCTAssertNil(SlideRenderer.changedRegion(from: slide, to: restacked))
+        var repainted = slide
+        repainted.background.color = .white
+        XCTAssertNil(SlideRenderer.changedRegion(from: slide, to: repainted))
+        // Text can overflow its box downwards, so a text edit reaches the page bottom,
+        // and so do mask labels.
+        var retyped = slide
+        retyped.elements[0].content = .text(TextSpec(text: "改了", fontSize: 40))
+        XCTAssertGreaterThan(SlideRenderer.changedRegion(from: slide, to: retyped)!.maxY, 720)
+        var covered = slide
+        covered.elements[2].masked = true
+        XCTAssertGreaterThan(SlideRenderer.changedRegion(from: slide, to: covered)!.maxY, 720)
+    }
+
+    /// Patching a render in place must give the same pixels as rendering from scratch.
+    func testIncrementalRenderMatchesFullRender() throws {
+        let cw = sampleCourseware()
+        let old = cw.slides[0]
+        var edits: [Slide] = []
+        var pen = old
+        pen.elements.append(.stroke(points: (0..<30).map { StrokePoint(x: 150 + Double($0) * 8, y: 120 + sin(Double($0) / 3) * 30) },
+                                    color: .red, width: 6, kind: .pen))
+        edits.append(pen)
+        var marker = old
+        marker.elements.append(.stroke(points: [StrokePoint(x: 120, y: 140), StrokePoint(x: 380, y: 150)], color: .yellow, width: 24,
+                                       kind: .highlighter))
+        edits.append(marker)
+        var erased = old
+        erased.elements.removeLast()
+        edits.append(erased)
+        var moved = old
+        moved.elements[1].move(dx: 40, dy: 30)
+        edits.append(moved)
+        let base = try XCTUnwrap(SlideRenderer.image(of: old, courseware: cw, pixelWidth: 640))
+        for (i, new) in edits.enumerated() {
+            let patched = try XCTUnwrap(SlideRenderer.image(updating: base, from: old, to: new, courseware: cw), "edit \(i)")
+            let full = try XCTUnwrap(SlideRenderer.image(of: new, courseware: cw, pixelWidth: 640))
+            XCTAssertLessThanOrEqual(maxPixelDifference(patched, full), 2, "edit \(i)")
+            XCTAssertGreaterThan(maxPixelDifference(patched, base), 50, "edit \(i) changed nothing")
+        }
+    }
+
+    /// Live ink only redraws the tail of the stroke, so every pixel that changes when a
+    /// point is added has to lie in that tail. Core Graphics re-rasterises the whole path,
+    /// which can nudge a stray antialiased pixel elsewhere by one level; that is invisible.
+    func testLiveStrokeTailCoversEveryChangedPixel() {
+        let scale: CGFloat = 2, w = 480, h = 320
+        func render(_ pts: [StrokePoint], width: Double, kind: PenKind) -> [UInt8] {
+            var data = [UInt8](repeating: 0, count: w * h * 4)
+            let ctx = CGContext(data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.translateBy(x: 0, y: CGFloat(h))
+            ctx.scaleBy(x: scale, y: -scale)
+            if !pts.isEmpty { SlideRenderer.drawStroke(Stroke(points: pts, color: .red, width: width, kind: kind), origin: .zero, in: ctx) }
+            return data
+        }
+        /// Largest change to a pixel outside `tail` (bitmap row 0 is the top of the page).
+        func changeOutside(_ tail: CGRect, _ a: [UInt8], _ b: [UInt8]) -> Int {
+            let cols = Int(floor(tail.minX * scale))...Int(ceil(tail.maxX * scale))
+            let rows = Int(floor(tail.minY * scale))...Int(ceil(tail.maxY * scale))
+            var worst = 0
+            for row in 0..<h {
+                for col in 0..<w where !(rows.contains(row) && cols.contains(col)) {
+                    let i = (row * w + col) * 4
+                    for k in i..<(i + 4) where a[k] != b[k] { worst = max(worst, abs(Int(a[k]) - Int(b[k]))) }
+                }
+            }
+            return worst
+        }
+        let pts = (0..<24).map { (i: Int) -> StrokePoint in
+            let t = Double(i)
+            let x: Double = 30 + t * 8 + sin(t) * 6
+            let y: Double = 80 + cos(t * 0.7) * 45
+            return StrokePoint(x: x, y: y, pressure: 0.3 + 0.7 * abs(sin(t * 0.9)))
+        }
+        for kind in PenKind.allCases {
+            let width = kind == .highlighter ? 20.0 : 8.0
+            var before = render([], width: width, kind: kind)
+            for n in 1...pts.count {
+                let live = Array(pts[0..<n])
+                let after = render(live, width: width, kind: kind)
+                let tail = SlideRenderer.liveStrokeTail(live, width: width, kind: kind)
+                XCTAssertLessThanOrEqual(changeOutside(tail, before, after), 1, "\(kind) point \(n)")
+                before = after
+            }
+        }
+    }
+
+    func maxPixelDifference(_ a: CGImage, _ b: CGImage) -> Int {
+        func bytes(_ img: CGImage) -> [UInt8] {
+            var data = [UInt8](repeating: 0, count: img.width * img.height * 4)
+            let ctx = CGContext(data: &data, width: img.width, height: img.height, bitsPerComponent: 8, bytesPerRow: img.width * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+            return data
+        }
+        guard a.width == b.width, a.height == b.height else { return 255 }
+        return zip(bytes(a), bytes(b)).reduce(0) { max($0, abs(Int($1.0) - Int($1.1))) }
+    }
+
     func pngData(_ img: CGImage) -> Data? {
         let d = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(d, "public.png" as CFString, 1, nil) else { return nil }

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import QuartzCore
 import XiwoCore
 
 /// The drawing surface used by both the editor and the presenter.
@@ -20,14 +21,22 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     /// Called for keys the canvas does not handle itself.
     var onKey: ((NSEvent) -> Bool)?
     var onPlayMedia: ((BoardElement) -> Void)?
+    /// Benchmark hook: the rect each draw covered and how long it took, in seconds.
+    var drawObserver: ((NSRect, Double) -> Void)?
 
     private var cancellables: Set<AnyCancellable> = []
-    private var cache: (image: CGImage, key: CacheKey)?
-    private struct CacheKey: Equatable { var revision: Int; var slide: Int; var size: CGSize; var hidden: Set<String>; var revealed: Set<String> }
+    private var cache: (image: CGImage, key: CacheKey, slide: Slide)?
+    private struct CacheKey: Equatable {
+        var revision: Int; var slide: Int; var size: CGSize; var page: CGSize; var hidden: Set<String>; var revealed: Set<String>
+        /// Same page drawn the same way, so the old image can be patched rather than redrawn.
+        func samePage(as other: CacheKey) -> Bool {
+            slide == other.slide && size == other.size && page == other.page && hidden == other.hidden && revealed == other.revealed
+        }
+    }
 
     private enum Drag {
         case none
-        case drawing([StrokePoint])
+        case drawing
         case erasing
         case moving(last: CGPoint, moved: Bool)
         case resizing(handle: Handle, original: BoardElement, start: CGPoint)
@@ -41,12 +50,16 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     enum Handle: CaseIterable { case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
     private var drag: Drag = .none
+    /// Points of the stroke being written. Kept outside `drag` so appending does not copy the array.
+    private var liveStrokePoints: [StrokePoint] = []
     private var pointer: CGPoint?            // slide coordinates
     private var laserTrail: [(CGPoint, TimeInterval)] = []
     private var laserTimer: Timer?
     private var lastDragTime: TimeInterval = 0
     private var lastDragPoint: CGPoint = .zero
     private var tabletPressure = PenPressureFilter()
+    /// Pointer speed for the brush, smoothed over a few samples (slide units per second).
+    private var brushSpeed: Double = 0
 
     private var editor: NSTextView?
     private var editingID: String?
@@ -138,24 +151,36 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private func slideImage() -> CGImage? {
         let px = (slideRect.size.width * (window?.backingScaleFactor ?? 2)).rounded()
         let key = CacheKey(revision: document.revision, slide: document.currentIndex, size: CGSize(width: px, height: 0),
-                           hidden: editingID.map { [$0] } ?? [], revealed: revealedMasks)
+                           page: slideSize, hidden: editingID.map { [$0] } ?? [], revealed: revealedMasks)
         if let cache, cache.key == key { return cache.image }
         let opts = RenderOptions(drawMasks: true, maskOpacity: mode == .edit ? 0.55 : 1, revealedMasks: revealedMasks,
                                 hidden: editingCell == nil ? key.hidden : [])
-        guard px > 1, let img = SlideRenderer.image(of: document.slide, courseware: document.courseware,
+        let slide = document.slide
+        // A new stroke or an eraser pass only repaints the pixels it touched.
+        if let cache, cache.key.samePage(as: key),
+           let img = SlideRenderer.image(updating: cache.image, from: cache.slide, to: slide, courseware: document.courseware, options: opts) {
+            self.cache = (img, key, slide)
+            return img
+        }
+        guard px > 1, let img = SlideRenderer.image(of: slide, courseware: document.courseware,
                                                     pixelWidth: Int(px), options: opts) else { return nil }
-        cache = (img, key)
+        cache = (img, key, slide)
         return img
     }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let started = drawObserver == nil ? 0 : CACurrentMediaTime()
+        defer { drawObserver?(dirtyRect, CACurrentMediaTime() - started) }
         ctx.setFillColor((mode == .edit ? NSColor.underPageBackgroundColor : NSColor.black).cgColor)
         ctx.fill(bounds)
         let r = slideRect
         if mode == .edit {
             ctx.saveGState()
-            ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 10, color: NSColor.black.withAlphaComponent(0.25).cgColor)
+            // The shadow only shows outside the page; skip its blur when redrawing just a patch of ink.
+            if !r.contains(dirtyRect) {
+                ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 10, color: NSColor.black.withAlphaComponent(0.25).cgColor)
+            }
             ctx.setFillColor(NSColor.white.cgColor)
             ctx.fill(r)
             ctx.restoreGState()
@@ -175,8 +200,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     private func drawLiveContent(_ ctx: CGContext) {
         switch drag {
-        case .drawing(let pts):
-            SlideRenderer.drawStroke(Stroke(points: pts, color: tools.penColor, width: tools.penWidth, kind: tools.penKind),
+        case .drawing:
+            SlideRenderer.drawStroke(Stroke(points: liveStrokePoints, color: tools.penColor, width: tools.penWidth, kind: tools.penKind),
                                      origin: .zero, in: ctx)
         case .creatingShape(let type, let a, let b):
             let (rect, anti) = shapeRect(type, a, b)
@@ -337,7 +362,12 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
         switch activeTool(event) {
         case .pen:
-            drag = .drawing([StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))])
+            brushSpeed = 0
+            liveStrokePoints = [StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))]
+            drag = .drawing
+            receiveEverySample(true)
+            setNeedsDisplay(liveInkDirtyRect())
+            return
         case .eraser:
             document.beginGesture()
             drag = .erasing
@@ -428,12 +458,15 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         let p = toSlide(convert(event.locationInWindow, from: nil))
         pointer = p
         switch drag {
-        case .drawing(var pts):
-            let last = pts.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
+        case .drawing:
+            let last = liveStrokePoints.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
             if hypot(p.x - last.x, p.y - last.y) >= 0.8 / scale {
-                pts.append(StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p)))
-                drag = .drawing(pts)
+                liveStrokePoints.append(StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p)))
+                setNeedsDisplay(liveInkDirtyRect())
             }
+            lastDragPoint = p
+            lastDragTime = event.timestamp
+            return
         case .erasing:
             erase(at: p)
         case .laser:
@@ -484,8 +517,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     override func mouseUp(with event: NSEvent) {
         switch drag {
-        case .drawing(let pts):
-            let simplified = Geometry.simplify(pts, tolerance: 0.35)
+        case .drawing:
+            receiveEverySample(false)
+            // Tight enough that the stored line does not visibly shift from the one drawn live.
+            let simplified = Geometry.simplify(liveStrokePoints, tolerance: min(0.35, 0.2 / scale))
             if !simplified.isEmpty {
                 document.editSlide { $0.elements.append(.stroke(points: simplified, color: self.tools.penColor,
                                                                 width: self.tools.penWidth, kind: self.tools.penKind)) }
@@ -503,6 +538,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             break
         }
         drag = .none
+        liveStrokePoints.removeAll(keepingCapacity: true)
         needsDisplay = true
     }
 
@@ -598,10 +634,34 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             return tabletPressure.next(Double(event.pressure))
         }
         guard tools.penKind == .brush else { return 1 }
-        // Mouse/trackpad: thinner when moving fast, like a brush.
+        // Mouse/trackpad: thinner when moving fast, like a brush. Samples arrive every
+        // few milliseconds, so average the speed over ~40 ms or the width flickers.
         let dt = max(event.timestamp - lastDragTime, 0.001)
         let speed = hypot(p.x - lastDragPoint.x, p.y - lastDragPoint.y) / dt
-        return max(0.25, min(1, 1.1 - speed / 2500))
+        brushSpeed += (speed - brushSpeed) * min(1, dt / 0.04)
+        return max(0.25, min(1, 1.1 - brushSpeed / 2500))
+    }
+
+    /// The part of the view the newest live-ink point changed.
+    private func liveInkDirtyRect() -> NSRect {
+        let tail = SlideRenderer.liveStrokeTail(liveStrokePoints, width: tools.penWidth, kind: tools.penKind)
+        return toView(tail).insetBy(dx: -2, dy: -2)
+    }
+
+    /// AppKit merges queued mouse moves into one by default. While writing, take every
+    /// sample the trackpad or tablet reports so fast strokes stay round instead of turning
+    /// into polygons.
+    private func receiveEverySample(_ on: Bool) {
+        NSEvent.isMouseCoalescingEnabled = !on
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil, case .drawing = drag {
+            receiveEverySample(false)
+            drag = .none
+            liveStrokePoints.removeAll()
+        }
     }
 
     private func shapeRect(_ t: ShapeType, _ a: CGPoint, _ b: CGPoint) -> (CGRect, Bool?) {
