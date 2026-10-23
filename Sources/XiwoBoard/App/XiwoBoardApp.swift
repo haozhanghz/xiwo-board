@@ -43,7 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // The benchmark hides the main window and quits by itself.
+        !MainActor.assumeIsolated { InkBenchmark.isRequested }
+    }
 }
 
 /// App-wide state: the open document, tools, and presentation.

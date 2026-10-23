@@ -7,8 +7,10 @@ import XiwoCore
 /// the ink path can be compared on real hardware without touching the screen.
 @MainActor
 enum InkBenchmark {
+    static let isRequested = CommandLine.arguments.contains("--ink-bench")
+
     static func runIfRequested() -> Bool {
-        guard CommandLine.arguments.contains("--ink-bench") else { return false }
+        guard isRequested else { return false }
         NSApp.setActivationPolicy(.prohibited)
         NSApp.windows.forEach { $0.orderOut(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
