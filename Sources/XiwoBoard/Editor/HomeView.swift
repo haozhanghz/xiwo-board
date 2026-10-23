@@ -139,10 +139,55 @@ struct SlidePreview: View {
     var pixelWidth = 320
 
     var body: some View {
-        if let img = SlideRenderer.image(of: slide, courseware: courseware, pixelWidth: pixelWidth) {
+        if let img = SlidePreviewCache.shared.image(slide: slide, courseware: courseware, pixelWidth: pixelWidth) {
             Image(decorative: img, scale: 1).resizable().aspectRatio(courseware.slideSize, contentMode: .fit)
         } else {
             Rectangle().fill(.gray.opacity(0.2))
+        }
+    }
+}
+
+/// Content-keyed thumbnails survive selection, tool and recording-time updates.
+/// Resource keys are content hashes; the full resource blobs stay out of the key.
+private final class SlidePreviewCache {
+    static let shared = SlidePreviewCache()
+    private let images = NSCache<Key, CGImage>()
+
+    private init() {
+        images.totalCostLimit = 32 * 1024 * 1024
+        images.countLimit = 256
+    }
+
+    func image(slide: Slide, courseware: Courseware, pixelWidth: Int) -> CGImage? {
+        let key = Key(slide: slide, size: courseware.slideSize, pixelWidth: pixelWidth)
+        if let image = images.object(forKey: key) { return image }
+        guard let image = SlideRenderer.image(of: slide, courseware: courseware, pixelWidth: pixelWidth) else { return nil }
+        images.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
+        return image
+    }
+
+    private final class Key: NSObject {
+        let slide: Slide
+        let size: CGSize
+        let pixelWidth: Int
+        private let cachedHash: Int
+
+        init(slide: Slide, size: CGSize, pixelWidth: Int) {
+            var visual = slide
+            visual.id = ""
+            visual.name = nil
+            visual.notes = ""
+            visual.transition = .none
+            self.slide = visual; self.size = size; self.pixelWidth = pixelWidth
+            var hasher = Hasher()
+            hasher.combine(visual); hasher.combine(size.width); hasher.combine(size.height); hasher.combine(pixelWidth)
+            cachedHash = hasher.finalize()
+        }
+
+        override var hash: Int { cachedHash }
+        override func isEqual(_ object: Any?) -> Bool {
+            guard let other = object as? Key else { return false }
+            return pixelWidth == other.pixelWidth && size == other.size && slide == other.slide
         }
     }
 }

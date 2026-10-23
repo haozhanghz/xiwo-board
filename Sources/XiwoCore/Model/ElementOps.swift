@@ -98,23 +98,69 @@ extension BoardElement {
     /// Returns the surviving pieces (empty if fully erased, `[self]` if untouched).
     public func erasing(center c: CGPoint, radius r: Double) -> [BoardElement] {
         guard case .stroke(let s) = content else { return [self] }
-        guard frame.insetBy(dx: -r, dy: -r).contains(c) else { return [self] }
+        let q = unrotate(c)
+        let reach = max(0, r) + s.width / 2
+        guard frame.insetBy(dx: -reach, dy: -reach).contains(q) else { return [self] }
         let pts = absoluteStrokePoints
-        let reach = r + s.width / 2
-        var pieces: [[StrokePoint]] = [[]]
-        var touched = false
-        for p in pts {
-            if hypot(p.x - c.x, p.y - c.y) <= reach {
-                touched = true
-                if !(pieces.last?.isEmpty ?? true) { pieces.append([]) }
-            } else {
-                pieces[pieces.count - 1].append(p)
-            }
+        guard pts.count > 1 else {
+            return pts.first.map { hypot($0.x - q.x, $0.y - q.y) <= reach ? [] : [self] } ?? [self]
         }
+        var pieces: [[StrokePoint]] = []
+        var piece: [StrokePoint] = []
+        var touched = false
+
+        func interpolate(_ a: StrokePoint, _ b: StrokePoint, _ t: Double) -> StrokePoint {
+            StrokePoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t,
+                        pressure: a.pressure + (b.pressure - a.pressure) * t)
+        }
+        func append(_ a: StrokePoint, _ b: StrokePoint) {
+            if piece.last != a { piece.append(a) }
+            if piece.last != b { piece.append(b) }
+        }
+        func finishPiece() {
+            if !piece.isEmpty { pieces.append(piece); piece = [] }
+        }
+
+        // Clip segments against the eraser circle. Simplified ink often has only
+        // two distant points, so testing just the stored points misses the line.
+        for i in 1..<pts.count {
+            let a = pts[i - 1], b = pts[i]
+            let dx = b.x - a.x, dy = b.y - a.y
+            let lengthSquared = dx * dx + dy * dy
+            if lengthSquared == 0 {
+                if hypot(a.x - q.x, a.y - q.y) <= reach { touched = true; finishPiece() }
+                else { append(a, b) }
+                continue
+            }
+            let ax = a.x - q.x, ay = a.y - q.y
+            let projection = -(ax * dx + ay * dy) / lengthSquared
+            let nearestX = ax + projection * dx, nearestY = ay + projection * dy
+            let depth = reach * reach - nearestX * nearestX - nearestY * nearestY
+            guard depth > 0 else { append(a, b); continue }
+            let halfSpan = sqrt(depth / lengthSquared)
+            let enter = max(0, projection - halfSpan), exit = min(1, projection + halfSpan)
+            guard enter < exit else { append(a, b); continue }
+            touched = true
+            if enter > 0 { append(a, interpolate(a, b, enter)) }
+            finishPiece()
+            if exit < 1 { append(interpolate(a, b, exit), b) }
+        }
+        finishPiece()
         guard touched else { return [self] }
-        return pieces.filter { $0.count >= 2 }.map {
-            var e = BoardElement.stroke(points: $0, color: s.color, width: s.width, kind: s.kind)
-            e.opacity = opacity
+        return pieces.map { points in
+            let fragment = BoardElement.stroke(points: points, color: s.color, width: s.width, kind: s.kind)
+            var e = self
+            e.frame = fragment.frame
+            e.content = fragment.content
+            // A fragment rotates around its own centre. Move that centre to its
+            // rotated position so splitting a rotated stroke keeps the ink still.
+            if rotation != 0 {
+                let angle = rotation * .pi / 180
+                let dx = e.center.x - center.x, dy = e.center.y - center.y
+                e.move(dx: dx * cos(angle) - dy * sin(angle) - dx,
+                       dy: dx * sin(angle) + dy * cos(angle) - dy)
+            }
+            e.id = BoardElement.newID()
             return e
         }
     }

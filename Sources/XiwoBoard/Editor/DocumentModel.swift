@@ -9,13 +9,18 @@ import XiwoCore
 final class DocumentModel: ObservableObject {
     @Published private(set) var courseware: Courseware
     @Published var currentIndex: Int = 0 {
-        didSet { if currentIndex != oldValue { selection = [] } }
+        didSet {
+            if currentIndex != oldValue { selection = []; MediaPlayerOverlay.stop() }
+        }
     }
     @Published var selection: Set<String> = []
     @Published private(set) var isDirty = false
     @Published var fileURL: URL?
     /// Bumps on every content change so views holding caches can refresh.
     @Published private(set) var revision = 0
+    @Published var pendingTitle: String?
+    /// The canvas installs this only while an in-place text editor is active.
+    var commitPendingEditing: (() -> Void)?
 
     private var undoStack: [Snapshot] = []
     private var redoStack: [Snapshot] = []
@@ -36,8 +41,18 @@ final class DocumentModel: ObservableObject {
 
     // MARK: Mutation & undo
 
+    func finishEditing() {
+        let title = pendingTitle
+        if title != nil { pendingTitle = nil }
+        let commit = commitPendingEditing
+        commitPendingEditing = nil
+        commit?()
+        if let title { rename(title) }
+    }
+
     /// Records an undo point, then applies `change` to the whole document.
     func edit(_ change: (inout Courseware) -> Void) {
+        finishEditing()
         pushUndo()
         change(&courseware)
         didChange()
@@ -73,6 +88,7 @@ final class DocumentModel: ObservableObject {
     }
 
     func undo() {
+        finishEditing()
         guard let s = undoStack.popLast() else { return }
         redoStack.append(Snapshot(courseware: courseware, index: currentIndex))
         courseware = s.courseware
@@ -81,6 +97,7 @@ final class DocumentModel: ObservableObject {
     }
 
     func redo() {
+        finishEditing()
         guard let s = redoStack.popLast() else { return }
         undoStack.append(Snapshot(courseware: courseware, index: currentIndex))
         courseware = s.courseware
@@ -126,6 +143,7 @@ final class DocumentModel: ObservableObject {
     }
 
     func go(to index: Int) {
+        finishEditing()
         currentIndex = max(0, min(courseware.slides.count - 1, index))
     }
 
@@ -241,6 +259,7 @@ final class DocumentModel: ObservableObject {
     private struct ClipPayload: Codable { var elements: [BoardElement]; var resources: [String: Resource] }
 
     func copySelection() {
+        finishEditing()
         let els = selectedElements
         guard !els.isEmpty else { return }
         var res: [String: Resource] = [:]
@@ -341,6 +360,7 @@ final class DocumentModel: ObservableObject {
     // MARK: Files
 
     func save(to url: URL) throws {
+        finishEditing()
         let data: Data
         switch url.pathExtension.lowercased() {
         case "enbx": data = EnbxExporter.encode(courseware)

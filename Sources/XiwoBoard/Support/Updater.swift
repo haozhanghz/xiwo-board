@@ -71,6 +71,7 @@ final class Updater: ObservableObject {
     private(set) var stagedApp: URL?
     /// Where `stagedApp` goes; see `installLocation(for:applications:)`.
     private(set) var installTarget: URL?
+    private var stagingDirectory: URL?
     /// Where an update goes when this copy cannot be replaced where it is.
     static var applicationsFolder = URL(fileURLWithPath: "/Applications")
 
@@ -91,7 +92,7 @@ final class Updater: ObservableObject {
 
     func check(userInitiated: Bool) async {
         switch phase {
-        case .checking, .downloading: return
+        case .checking, .downloading, .ready: return
         default: break
         }
         phase = .checking
@@ -135,6 +136,7 @@ final class Updater: ObservableObject {
         let json = try JSONDecoder().decode(GitHubRelease.self, from: data)
         guard let zip = json.assets.first(where: { $0.name.hasSuffix("-arm64.zip") }) else { throw UpdateError.noArchive }
         let sum = json.assets.first { $0.name == zip.name + ".sha256" }
+        guard sum != nil else { throw UpdateError.noChecksum }
         return Release(version: AppVersion(json.tagName)?.description ?? json.tagName,
                        notes: json.body ?? "",
                        page: json.htmlURL,
@@ -145,22 +147,24 @@ final class Updater: ObservableObject {
     // MARK: Installing
 
     func download(_ release: Release) async {
+        guard case .available(let available) = phase, available == release else { return }
         phase = .downloading(release)
         do {
+            clearStaging()
             let target = try Self.installLocation(for: Bundle.main.bundleURL, applications: Self.applicationsFolder)
             // Staged on the target's volume, so installing is a rename. The running copy's
             // own volume may be read-only, which is what made staging fail before.
             let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
                                                       appropriateFor: target.deletingLastPathComponent(), create: true)
+            stagingDirectory = staging
             let zip = staging.appendingPathComponent(release.archive.name)
             try await fetch(release.archive, to: zip)
-            if let checksum = release.checksum {
-                let sumFile = staging.appendingPathComponent(checksum.name)
-                try await fetch(checksum, to: sumFile)
-                let expected = try String(contentsOf: sumFile, encoding: .utf8).split(separator: " ").first.map(String.init) ?? ""
-                let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-                guard expected.lowercased() == actual else { throw UpdateError.checksumMismatch }
-            }
+            guard let checksum = release.checksum else { throw UpdateError.noChecksum }
+            let sumFile = staging.appendingPathComponent(checksum.name)
+            try await fetch(checksum, to: sumFile)
+            let expected = try String(contentsOf: sumFile, encoding: .utf8).split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+            let actual = try await Task.detached(priority: .utility) { try Self.sha256(of: zip) }.value
+            guard expected.lowercased() == actual else { throw UpdateError.checksumMismatch }
             let unpacked = staging.appendingPathComponent("unpacked", isDirectory: true)
             try await Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
             let app = unpacked.appendingPathComponent("XiwoBoard.app")
@@ -176,6 +180,7 @@ final class Updater: ObservableObject {
             log.info("Update \(release.version, privacy: .public) staged at \(app.path, privacy: .public)")
         } catch {
             log.error("Update download failed: \(String(describing: error), privacy: .public)")
+            clearStaging()
             phase = .failed(error.localizedDescription)
         }
     }
@@ -186,7 +191,7 @@ final class Updater: ObservableObject {
         guard AppModel.shared.confirmClose() else { return }
         do {
             try Self.install(staged, at: target)
-            stagedApp = nil
+            clearStaging()
             // Reopen once this process has exited.
             let relaunch = Process()
             relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -243,6 +248,22 @@ final class Updater: ObservableObject {
         try FileManager.default.moveItem(at: file, to: destination)
     }
 
+    private func clearStaging() {
+        if let stagingDirectory { try? FileManager.default.removeItem(at: stagingDirectory) }
+        stagingDirectory = nil
+        stagedApp = nil
+        installTarget = nil
+    }
+
+    /// Stream hashing off the main actor keeps large updates out of UI memory.
+    nonisolated private static func sha256(of url: URL) throws -> String {
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        var hash = SHA256()
+        while let chunk = try file.read(upToCount: 1024 * 1024), !chunk.isEmpty { hash.update(data: chunk) }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     private static func run(_ tool: String, _ arguments: [String]) async throws {
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
             let p = Process()
@@ -265,6 +286,7 @@ final class Updater: ObservableObject {
         case noAccess
         case http(Int)
         case noArchive
+        case noChecksum
         case checksumMismatch
         case badArchive
         case toolFailed(String, Int32)
@@ -277,6 +299,7 @@ final class Updater: ObservableObject {
                 return "暂时无法访问 GitHub 的发布页面，可能是访问次数超限，请稍后再试。"
             case .http(let code): return "下载失败（HTTP \(code)）。"
             case .noArchive: return "最新版本里没有找到 Apple 芯片的安装包。"
+            case .noChecksum: return "最新版本缺少校验文件，暂时无法在应用内安装，请前往发布页面查看。"
             case .checksumMismatch: return "下载的文件校验不通过，可能下载不完整，请重试。"
             case .badArchive: return "安装包内容不对（应用标识或版本号不符）。"
             case .toolFailed(let tool, let code): return "\(tool) 执行失败（\(code)）。"
