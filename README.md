@@ -36,8 +36,9 @@ open build/XiwoBoard.app
 swift test                      # 核心库单元测试
 ```
 
-推送 `v*` 标签时，GitHub Actions 会在 Apple 芯片的 macOS 机器上编译、测试并发布 Release，
-发布说明取自 `docs/releases/<标签>.md`。标签需要和 `Info.plist` 里的版本号一致。
+每次推送和 PR，GitHub Actions 都会在 Apple 芯片的 macOS 机器上编译、测试并打包。
+`Info.plist` 里的版本号第一次合进 `main` 时，会自动发布 `v<版本号>` 的 Release（推送同名标签也可以），
+发布说明取自 `docs/releases/v<版本号>.md`。所以发新版只需要改版本号、写好发布说明，再合进 `main`。
 
 第一次录屏时，系统会请求「录屏与系统录音」和麦克风权限；授权后需要重新打开应用。
 
