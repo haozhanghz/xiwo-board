@@ -27,10 +27,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private var cancellables: Set<AnyCancellable> = []
     private var cache: (image: CGImage, key: CacheKey, slide: Slide)?
     private struct CacheKey: Equatable {
-        var revision: Int; var slide: Int; var size: CGSize; var hidden: Set<String>; var revealed: Set<String>
+        var revision: Int; var slide: Int; var size: CGSize; var page: CGSize; var hidden: Set<String>; var revealed: Set<String>
         /// Same page drawn the same way, so the old image can be patched rather than redrawn.
         func samePage(as other: CacheKey) -> Bool {
-            slide == other.slide && size == other.size && hidden == other.hidden && revealed == other.revealed
+            slide == other.slide && size == other.size && page == other.page && hidden == other.hidden && revealed == other.revealed
         }
     }
 
@@ -134,7 +134,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private func slideImage() -> CGImage? {
         let px = (slideRect.size.width * (window?.backingScaleFactor ?? 2)).rounded()
         let key = CacheKey(revision: document.revision, slide: document.currentIndex, size: CGSize(width: px, height: 0),
-                           hidden: editingID.map { [$0] } ?? [], revealed: revealedMasks)
+                           page: slideSize, hidden: editingID.map { [$0] } ?? [], revealed: revealedMasks)
         if let cache, cache.key == key { return cache.image }
         let opts = RenderOptions(drawMasks: true, maskOpacity: mode == .edit ? 0.55 : 1, revealedMasks: revealedMasks,
                                 hidden: editingCell == nil ? key.hidden : [])

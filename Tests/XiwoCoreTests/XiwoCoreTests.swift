@@ -174,10 +174,14 @@ final class XiwoCoreTests: XCTestCase {
         var repainted = slide
         repainted.background.color = .white
         XCTAssertNil(SlideRenderer.changedRegion(from: slide, to: repainted))
-        // Text can overflow its box downwards, so a text edit reaches the page bottom.
+        // Text can overflow its box downwards, so a text edit reaches the page bottom,
+        // and so do mask labels.
         var retyped = slide
         retyped.elements[0].content = .text(TextSpec(text: "改了", fontSize: 40))
         XCTAssertGreaterThan(SlideRenderer.changedRegion(from: slide, to: retyped)!.maxY, 720)
+        var covered = slide
+        covered.elements[2].masked = true
+        XCTAssertGreaterThan(SlideRenderer.changedRegion(from: slide, to: covered)!.maxY, 720)
     }
 
     /// Patching a render in place must give the same pixels as rendering from scratch.

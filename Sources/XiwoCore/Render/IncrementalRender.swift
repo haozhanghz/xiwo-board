@@ -8,27 +8,31 @@ extension SlideRenderer {
     static let wholePage = CGRect(x: -1e7, y: -1e7, width: 2e7, height: 2e7)
 
     /// Everything an element can paint, in slide coordinates. Text may run past the
-    /// bottom of its box, so anything holding text reaches down to the page bottom,
-    /// and rotated text could go anywhere.
+    /// bottom of its box, so anything holding text (mask labels and media names too)
+    /// reaches down to the page bottom, and rotated text could go anywhere.
     public static func paintBounds(of e: BoardElement) -> CGRect {
-        func withText(_ box: CGRect) -> CGRect {
-            guard e.rotation == 0 else { return wholePage }
-            return CGRect(x: box.minX, y: box.minY, width: box.width, height: 1e7)
-        }
+        var box = e.boundingBox.insetBy(dx: -2, dy: -2)
+        var hasText = e.masked
         switch e.content {
-        case .stroke, .image, .media:
-            return e.boundingBox.insetBy(dx: -2, dy: -2)
+        case .stroke, .image:
+            break
+        case .media:
+            hasText = true
         case .shape(let s):
             let lw = s.style.lineWidth
             let m = max(12, lw * 4) + lw + 4
-            let box = e.boundingBox.insetBy(dx: -m, dy: -m)
-            return (s.text ?? "").isEmpty ? box : withText(box)
+            box = e.boundingBox.insetBy(dx: -m, dy: -m)
+            hasText = hasText || !(s.text ?? "").isEmpty
         case .text, .table:
-            return withText(e.boundingBox.insetBy(dx: -12, dy: -12))
+            box = e.boundingBox.insetBy(dx: -12, dy: -12)
+            hasText = true
         case .group(let children):
             guard e.rotation == 0 else { return wholePage }
-            return children.reduce(e.boundingBox.insetBy(dx: -2, dy: -2)) { $0.union(paintBounds(of: $1)) }
+            box = children.reduce(box) { $0.union(paintBounds(of: $1)) }
         }
+        guard hasText else { return box }
+        guard e.rotation == 0 else { return wholePage }
+        return CGRect(x: box.minX, y: box.minY, width: box.width, height: 1e7)
     }
 
     /// What can change on screen when the last of `points` has just been added to a
