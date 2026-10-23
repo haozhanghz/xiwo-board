@@ -329,6 +329,18 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         }
     }
 
+    func togglePause() {
+        guard !isEnding else { return }
+        Task { [weak self] in
+            guard let self, !self.isEnding else { return }
+            if self.recorder.isPaused {
+                await self.recorder.resume()
+            } else {
+                await self.recorder.pause()
+            }
+        }
+    }
+
     // MARK: End
 
     func end() {
@@ -456,6 +468,12 @@ struct PresentationToolbar: View {
             }
             sep
             recordButton
+            if recorder.isRecording {
+                RibbonButton(title: recorder.isPaused ? "继续" : "暂停",
+                             systemImage: recorder.isPaused ? "play.circle" : "pause.circle",
+                             active: recorder.isPaused) { presenter.togglePause() }
+                    .help(recorder.isPaused ? "继续录制" : "暂停录制，暂停的时间不会录进视频")
+            }
             RibbonButton(title: "隐藏工具", systemImage: "eye.slash") { presenter.chromeVisible = false }
                 .help("隐藏全部工具，只显示课件（H 键或右下角按钮恢复）")
             RibbonButton(title: presenter.simpleToolbar ? "普通工具栏" : "简单工具栏",
@@ -495,20 +513,20 @@ struct PresentationToolbar: View {
 
     private var isShape: Bool { if case .shape = tools.tool { return true } else { return false } }
 
-    /// Opens the recording options while idle; stops straight away while recording.
+    /// Opens the recording options while idle; stops straight away while recording or paused.
     private var recordButton: some View {
         let title: String
         switch recorder.state {
         case .idle: title = "录制"
         case .starting: title = "准备中"
-        case .recording: title = LectureRecorder.format(recorder.elapsed)
+        case .recording, .paused: title = LectureRecorder.format(recorder.elapsed)
         case .stopping: title = "保存中"
         }
         return flyoutButton(.record, title: title, systemImage: recorder.isRecording ? "stop.circle.fill" : "record.circle",
                             active: recorder.isRecording) {
             switch recorder.state {
             case .idle: presenter.toggleFlyout(.record)
-            case .recording: presenter.toggleRecording()
+            case .recording, .paused: presenter.toggleRecording()
             case .starting, .stopping: break
             }
         }
@@ -535,7 +553,7 @@ struct RecordingOptions: View {
             Toggle("录制麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
             Toggle("录制电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
             Toggle("录制鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
-            Text("视频保存在「影片 › XiwoBoard 录课」。录制中再点一次「录制」按钮即可停止。不录鼠标指针时，可以用激光笔在视频里指示。")
+            Text("视频保存在「影片 › XiwoBoard 录课」。录制中点「暂停」可以暂停，暂停的时间不会录进视频；再点一次「录制」按钮即可停止。不录鼠标指针时，可以用激光笔在视频里指示。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -570,8 +588,16 @@ struct ChromeHandle: View {
     var body: some View {
         HStack(spacing: 6) {
             if recorder.isRecording {
-                Circle().fill(.red).frame(width: 8, height: 8)
+                Circle().fill(recorder.isPaused ? .orange : .red).frame(width: 8, height: 8)
                 Text(LectureRecorder.format(recorder.elapsed)).font(.caption.monospacedDigit())
+                Button { presenter.togglePause() } label: {
+                    Image(systemName: recorder.isPaused ? "play.fill" : "pause.fill").font(.system(size: 13))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(recorder.isPaused ? "继续录制" : "暂停录制")
+                .accessibilityLabel(recorder.isPaused ? "继续录制" : "暂停录制")
             }
             Button { presenter.chromeVisible = true } label: {
                 Image(systemName: "wrench.and.screwdriver").font(.system(size: 15))
