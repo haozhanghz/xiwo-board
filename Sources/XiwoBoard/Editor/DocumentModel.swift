@@ -333,7 +333,7 @@ final class DocumentModel: ObservableObject {
 
     func insertShape(_ type: ShapeType, style: ShapeAppearance) {
         let size = courseware.slideSize
-        let w = 240.0, h = type.isLine ? 0.0 : 160.0
+        let w: CGFloat = 240, h: CGFloat = type.isLine ? 0 : 160
         insert(BoardElement(frame: CGRect(x: (size.width - w) / 2, y: (size.height - max(h, 1)) / 2, width: w, height: max(h, 1)),
                             content: .shape(ShapeSpec(type: type, style: style))))
     }

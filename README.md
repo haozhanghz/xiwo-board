@@ -19,6 +19,13 @@
 
 完整清单和实现状态见 [docs/FEATURES.md](docs/FEATURES.md)。
 
+## 下载安装
+
+到 [Releases](https://github.com/haozhanghz/xiwo-board/releases/latest) 下载 `XiwoBoard-<版本>-arm64.zip`，解压后把 `XiwoBoard.app` 拖进「应用程序」。
+
+应用没有经过 Apple 公证，第一次打开会被系统拦下。可以在「系统设置 › 隐私与安全性」底部点「仍要打开」，
+或者在终端运行 `xattr -cr /Applications/XiwoBoard.app`。需要 Apple 芯片和 macOS 15 及以上。
+
 ## 构建
 
 需要 macOS 15 及以上、Xcode 16 及以上（在 Xcode 27 / macOS 27 上验证）。
@@ -28,6 +35,10 @@
 open build/XiwoBoard.app
 swift test                      # 核心库单元测试
 ```
+
+每次推送和 PR，GitHub Actions 都会在 Apple 芯片的 macOS 机器上编译、测试并打包。
+`Info.plist` 里的版本号第一次合进 `main` 时，会自动发布 `v<版本号>` 的 Release（推送同名标签也可以），
+发布说明取自 `docs/releases/v<版本号>.md`。所以发新版只需要改版本号、写好发布说明，再合进 `main`。
 
 第一次录屏时，系统会请求「录屏与系统录音」和麦克风权限；授权后需要重新打开应用。
 

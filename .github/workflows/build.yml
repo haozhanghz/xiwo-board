@@ -1,0 +1,87 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (arm64)
+    runs-on: macos-15
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Build app
+        run: ./scripts/build-app.sh
+
+      - name: Package
+        id: package
+        run: |
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Info.plist version $VERSION"
+            exit 1
+          fi
+          ZIP="XiwoBoard-$VERSION-arm64.zip"
+          # ditto keeps the bundle layout and code signature intact.
+          ditto -c -k --keepParent build/XiwoBoard.app "$ZIP"
+          shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XiwoBoard-arm64
+          path: XiwoBoard-*-arm64.zip*
+          if-no-files-found: error
+
+  # Publishes v<Info.plist version> the first time that version reaches main
+  # (or when its tag is pushed); later pushes with the same version do nothing.
+  release:
+    name: Publish release
+    needs: build
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: XiwoBoard-arm64
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to publish."
+            exit 0
+          fi
+          NOTES="docs/releases/$TAG.md"
+          if [ -f "$NOTES" ]; then ARGS=(--notes-file "$NOTES"); else ARGS=(--generate-notes); fi
+          gh release create "$TAG" XiwoBoard-*-arm64.zip XiwoBoard-*-arm64.zip.sha256 \
+            --target "$GITHUB_SHA" --title "XiwoBoard $VERSION" "${ARGS[@]}"
