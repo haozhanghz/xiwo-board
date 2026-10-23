@@ -40,5 +40,5 @@ final class ToolState: ObservableObject {
     @Published var spotlightRadius: Double = 160
     @Published var magnifierZoom: Double = 2
 
-    static let penWidths: [Double] = [2, 4, 8, 14, 24]
+    static let penWidths: [Double] = [1, 2, 4, 8, 14, 24]
 }
