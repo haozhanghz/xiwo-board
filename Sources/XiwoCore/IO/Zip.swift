@@ -37,15 +37,23 @@ public struct ZipReader {
         let minStart = max(0, data.count - 65_557)
         var i = data.count - 22
         while i >= minStart {
-            if data.u32(i) == 0x0605_4B50 { eocd = i; break }
+            if data.u32(i) == 0x0605_4B50, i + 22 + Int(data.u16(i + 20)) == data.count,
+               Int(data.u32(i + 16)) + Int(data.u32(i + 12)) == i {
+                eocd = i; break
+            }
             i -= 1
         }
         guard eocd >= 0 else { throw ZipError.notAZip }
         let count = Int(data.u16(eocd + 10))
         var p = Int(data.u32(eocd + 16))
+        let directorySize = Int(data.u32(eocd + 12))
+        guard data.u16(eocd + 4) == 0, data.u16(eocd + 6) == 0,
+              data.u16(eocd + 8) == UInt16(count), count != 0xFFFF,
+              p <= eocd, directorySize <= eocd - p else { throw ZipError.corrupt("central directory") }
+        let directoryEnd = p + directorySize
         var list: [Entry] = []
         for _ in 0..<count {
-            guard p + 46 <= data.count, data.u32(p) == 0x0201_4B50 else { throw ZipError.corrupt("central directory") }
+            guard p + 46 <= directoryEnd, data.u32(p) == 0x0201_4B50 else { throw ZipError.corrupt("central directory") }
             let flags = data.u16(p + 8)
             let method = data.u16(p + 10)
             let crc = data.u32(p + 16)
@@ -55,6 +63,11 @@ public struct ZipReader {
             let extraLen = Int(data.u16(p + 30))
             let commentLen = Int(data.u16(p + 32))
             let offset = Int(data.u32(p + 42))
+            let entryEnd = p + 46 + nameLen + extraLen + commentLen
+            guard entryEnd <= directoryEnd, flags & 1 == 0, data.u16(p + 34) == 0,
+                  csize != Int(UInt32.max), usize != Int(UInt32.max), offset != Int(UInt32.max) else {
+                throw ZipError.corrupt("central directory entry")
+            }
             let nameData = data.subdata(in: (p + 46)..<(p + 46 + nameLen))
             // Bit 11 marks UTF-8 names; older Windows tools write GBK, which is what
             // Chinese courseware archives usually contain.
@@ -68,7 +81,7 @@ public struct ZipReader {
             }
             list.append(Entry(path: name.replacingOccurrences(of: "\\", with: "/"), method: method,
                               compressedSize: csize, uncompressedSize: usize, localHeaderOffset: offset, crc: crc))
-            p += 46 + nameLen + extraLen + commentLen
+            p = entryEnd
         }
         entries = list
     }
@@ -93,11 +106,16 @@ public struct ZipReader {
         let start = h + 30 + Int(data.u16(h + 26)) + Int(data.u16(h + 28))
         guard start + e.compressedSize <= data.count else { throw ZipError.corrupt(e.path) }
         let raw = data.subdata(in: start..<(start + e.compressedSize))
+        let decoded: Data
         switch e.method {
-        case 0: return raw
-        case 8: return try Deflate.inflate(raw, expectedSize: e.uncompressedSize)
+        case 0: decoded = raw
+        case 8: decoded = try Deflate.inflate(raw, expectedSize: e.uncompressedSize)
         default: throw ZipError.unsupportedCompression(e.method)
         }
+        guard decoded.count == e.uncompressedSize, CRC32.checksum(decoded) == e.crc else {
+            throw ZipError.corrupt(e.path)
+        }
+        return decoded
     }
 }
 
@@ -167,8 +185,9 @@ public struct ZipWriter {
 
 enum Deflate {
     static func inflate(_ data: Data, expectedSize: Int) throws -> Data {
-        if expectedSize == 0 { return Data() }
-        return try process(data, operation: COMPRESSION_STREAM_DECODE, sizeHint: expectedSize)
+        let result = try process(data, operation: COMPRESSION_STREAM_DECODE, sizeHint: expectedSize, outputLimit: expectedSize)
+        guard result.count == expectedSize else { throw ZipError.corrupt("deflate size") }
+        return result
     }
 
     static func deflate(_ data: Data) throws -> Data {
@@ -176,7 +195,7 @@ enum Deflate {
     }
 
     /// COMPRESSION_ZLIB in Apple's Compression framework is raw DEFLATE (RFC 1951), which is what ZIP uses.
-    private static func process(_ input: Data, operation: compression_stream_operation, sizeHint: Int) throws -> Data {
+    private static func process(_ input: Data, operation: compression_stream_operation, sizeHint: Int, outputLimit: Int? = nil) throws -> Data {
         let streamPtr = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
         defer { streamPtr.deallocate() }
         var status = compression_stream_init(streamPtr, operation, COMPRESSION_ZLIB)
@@ -186,16 +205,22 @@ enum Deflate {
         let dst = UnsafeMutablePointer<UInt8>.allocate(capacity: chunk)
         defer { dst.deallocate() }
         var output = Data()
-        output.reserveCapacity(sizeHint)
+        output.reserveCapacity(min(sizeHint, chunk))
         try input.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
             streamPtr.pointee.src_ptr = src.bindMemory(to: UInt8.self).baseAddress ?? UnsafePointer(dst)
             streamPtr.pointee.src_size = input.count
             repeat {
                 streamPtr.pointee.dst_ptr = dst
                 streamPtr.pointee.dst_size = chunk
+                let remainingInput = streamPtr.pointee.src_size
                 status = compression_stream_process(streamPtr, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
                 guard status != COMPRESSION_STATUS_ERROR else { throw ZipError.corrupt("deflate stream") }
-                output.append(dst, count: chunk - streamPtr.pointee.dst_size)
+                let written = chunk - streamPtr.pointee.dst_size
+                if let outputLimit, written > outputLimit - output.count { throw ZipError.corrupt("deflate size") }
+                guard status != COMPRESSION_STATUS_OK || written > 0 || streamPtr.pointee.src_size < remainingInput else {
+                    throw ZipError.corrupt("truncated deflate stream")
+                }
+                output.append(dst, count: written)
             } while status == COMPRESSION_STATUS_OK
         }
         return output

@@ -34,7 +34,7 @@ struct RibbonButton: View {
                     Text(title).font(.system(size: 11)).fixedSize()
                 }
             }
-            .frame(minWidth: density == .regular ? 46 : 28, minHeight: density == .iconOnly ? 34 : 0)
+            .frame(minWidth: density == .regular ? 46 : 32, minHeight: density == .iconOnly ? 34 : 0)
             .padding(.vertical, 5).padding(.horizontal, density == .regular ? 4 : 2)
             .foregroundStyle(active ? Color.accentColor : (tint ?? Color.primary))
             .background(active ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
@@ -42,6 +42,8 @@ struct RibbonButton: View {
         }
         .buttonStyle(.plain)
         .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
@@ -66,7 +68,7 @@ struct EditorToolbar: View {
     @ObservedObject var doc: DocumentModel
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var tools: ToolState
-    @State private var title = ""
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         HStack(spacing: 2) {
@@ -88,14 +90,16 @@ struct EditorToolbar: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 30)
+            .accessibilityLabel("文件菜单")
             .padding(.leading, 76) // clear the traffic lights
 
-            TextField("课件名称", text: $title, onCommit: { doc.rename(title) })
+            TextField("课件名称", text: Binding(get: { doc.pendingTitle ?? doc.title }, set: { doc.pendingTitle = $0 }))
                 .textFieldStyle(.plain)
                 .font(.headline)
                 .frame(width: 140)
-                .onAppear { title = doc.title }
-                .onChange(of: doc.title) { _, t in title = t }
+                .focused($titleFocused)
+                .onSubmit { doc.finishEditing() }
+                .onChange(of: titleFocused) { _, focused in if !focused { doc.finishEditing() } }
 
             // Labels shrink, then disappear, so 授课 stays visible in narrow windows.
             ViewThatFits(in: .horizontal) {
@@ -188,6 +192,8 @@ struct PenSettings: View {
                             .background(isWidth(w) ? Color.accentColor.opacity(0.2) : .clear, in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("笔宽 \(Int(tools.penKind == .highlighter ? w * 3 : w))")
+                    .accessibilityAddTraits(isWidth(w) ? .isSelected : [])
                 }
             }
             ColorSwatches(selection: $tools.penColor)
@@ -205,21 +211,31 @@ struct ColorSwatches: View {
     var palette: [RGBA] = RGBA.penPalette
 
     var body: some View {
-        HStack(spacing: 3) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 26), spacing: 3)], alignment: .leading, spacing: 4) {
             ForEach(palette, id: \.self) { c in
                 Button { selection = c } label: {
                     Circle().fill(Color(nsColor: c.nsColor))
                         .overlay(Circle().stroke(Color.gray.opacity(0.5), lineWidth: 1))
                         .frame(width: 18, height: 18)
-                        .padding(2)
+                        .frame(minWidth: 26, minHeight: 26)
+                        .contentShape(Rectangle())
                         .overlay(Circle().stroke(selection == c ? Color.accentColor : .clear, lineWidth: 2))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(colorName(c))
+                .accessibilityAddTraits(selection == c ? .isSelected : [])
             }
-            ColorPicker("", selection: Binding(get: { Color(nsColor: selection.nsColor) },
+            ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
                                                set: { selection = RGBA(NSColor($0)) }))
                 .labelsHidden()
+                .frame(width: 26)
         }
+    }
+
+    private func colorName(_ color: RGBA) -> String {
+        let names = ["黑色", "白色", "红色", "橙色", "黄色", "绿色", "蓝色", "紫色"]
+        if let index = RGBA.penPalette.firstIndex(of: color) { return names[index] }
+        return "颜色 \(color.argbHex)"
     }
 }
 
@@ -258,6 +274,7 @@ struct ShapePicker: View {
                 }
                 .buttonStyle(.plain)
                 .help(t.displayName)
+                .accessibilityLabel(t.displayName)
             }
         }
     }

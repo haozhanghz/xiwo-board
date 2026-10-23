@@ -20,6 +20,7 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     @Published var simpleToolbar = false { didSet { layoutChrome() } }
     @Published var showPages = false { didSet { layoutChrome() } }
     @Published var showTimer = false { didSet { layoutChrome() } }
+    @Published private(set) var isEnding = false
 
     /// Settings panels opened from the toolbar (笔、橡皮、形状、录制).
     enum Flyout: Hashable { case pen, eraser, shape, record }
@@ -40,6 +41,7 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     private var lastIndex: Int
     private var cancellables: Set<AnyCancellable> = []
     private var savedTool: Tool
+    private var autoPlayTask: Task<Void, Never>?
 
     init(document: DocumentModel, tools: ToolState, recorder: LectureRecorder) {
         self.document = document
@@ -74,7 +76,8 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         w.contentView = c
         canvas = c
 
-        toolbarPanel = makePanel(PresentationToolbar(presenter: self).environmentObject(tools).environmentObject(recorder))
+        toolbarPanel = makePanel(PresentationToolbar(presenter: self, maxWidth: screen.frame.width - 24)
+            .environmentObject(tools).environmentObject(recorder))
         handlePanel = makePanel(ChromeHandle(presenter: self))
 
         tools.tool = .pen
@@ -116,9 +119,11 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
 
     /// Positions and shows/hides the tool panels.
     func layoutChrome() {
-        guard let window, let screen = window.screen else { return }
+        guard !isEnding, let window, let screen = window.screen else { return }
         let frame = screen.frame
-        let toolbarSize = toolbarPanel.contentView!.fittingSize
+        let fitting = toolbarPanel.contentView!.fittingSize
+        // Rounded up so the layout the toolbar measured with still fits once placed.
+        let toolbarSize = NSSize(width: fitting.width.rounded(.up), height: fitting.height.rounded(.up))
         toolbarPanel.setContentSize(toolbarSize)
         toolbarPanel.setFrameOrigin(NSPoint(x: frame.midX - toolbarSize.width / 2, y: frame.minY + 18))
         let hs = handlePanel.contentView!.fittingSize
@@ -195,6 +200,8 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         if let p = flyoutPanel {
             window.removeChildWindow(p)
             p.orderOut(nil)
+            p.contentView = nil
+            p.close()
             flyoutPanel = nil
         }
         if flyout != nil { flyout = nil }
@@ -231,7 +238,7 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     }
 
     private func pageChanged(to index: Int) {
-        guard index != lastIndex else { return }
+        guard !isEnding, index != lastIndex else { return }
         let forward = index > lastIndex
         lastIndex = index
         MediaPlayerOverlay.stop()
@@ -251,11 +258,14 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     }
 
     private func autoPlayMedia() {
+        autoPlayTask?.cancel()
+        let slideID = document.slide.id
         guard let e = document.slide.elements.first(where: {
             if case .media(let m) = $0.content { return m.autoPlay } else { return false }
         }) else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self else { return }
+        autoPlayTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: 400_000_000) } catch { return }
+            guard let self, !self.isEnding, self.document.slide.id == slideID else { return }
             MediaPlayerOverlay.play(e, document: self.document, in: self.canvas)
         }
     }
@@ -300,8 +310,9 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     // MARK: Recording
 
     func toggleRecording() {
+        guard !isEnding else { return }
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isEnding else { return }
             if self.recorder.isRecording {
                 await self.recorder.stop()
             } else {
@@ -313,9 +324,11 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     // MARK: End
 
     func end() {
-        if recorder.isRecording {
-            Task { await recorder.stop(); finishEnd() }
-        } else {
+        guard !isEnding else { return }
+        isEnding = true
+        autoPlayTask?.cancel()
+        Task {
+            await recorder.stop()
             finishEnd()
         }
     }
@@ -342,8 +355,22 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         closeFlyout()
         if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         mouseMonitor = nil
+        // Hosting views retain the presenter through @ObservedObject. Break
+        // those cycles so each lecture releases its panels and document snapshot.
+        for panel in chromeWindows {
+            window.removeChildWindow(panel)
+            panel.contentView = nil
+            panel.close()
+        }
+        toolbarPanel = nil
+        handlePanel = nil
+        pagesPanel = nil
+        timerPanel = nil
         window.close()
+        window.contentView = nil
+        canvas = nil
         onClose?()
+        onClose = nil
     }
 
     func windowDidResignKey(_ notification: Notification) {}
@@ -362,13 +389,42 @@ struct PresentationToolbar: View {
     @ObservedObject var doc: DocumentModel
     @EnvironmentObject var tools: ToolState
     @EnvironmentObject var recorder: LectureRecorder
+    let maxWidth: CGFloat
 
-    init(presenter: PresentationController) {
+    init(presenter: PresentationController, maxWidth: CGFloat) {
         self.presenter = presenter
         self.doc = presenter.document
+        self.maxWidth = maxWidth
     }
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            bar(buttons.environment(\.ribbonDensity, .regular))
+            bar(buttons.environment(\.ribbonDensity, .tight))
+            bar(buttons.environment(\.ribbonDensity, .iconOnly))
+            bar(ScrollView(.horizontal, showsIndicators: true) {
+                buttons.environment(\.ribbonDensity, .iconOnly)
+            })
+        }
+        // Only caps the width on narrow screens. Each layout carries its own background
+        // and the scrolling one has no fixed width, so on a wide screen the panel stays
+        // as wide as the buttons instead of stretching across the screen.
+        .frame(maxWidth: maxWidth)
+        .environment(\.colorScheme, .dark)
+        .padding(4)
+        .fixedSize(horizontal: false, vertical: true)
+        .coordinateSpace(name: Self.space)
+        .onPreferenceChange(FlyoutAnchorKey.self) { presenter.flyoutAnchors = $0 }
+        .disabled(presenter.isEnding)
+    }
+
+    private func bar(_ content: some View) -> some View {
+        content
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.15)))
+    }
+
+    private var buttons: some View {
         HStack(spacing: 4) {
             RibbonButton(title: "结束授课", systemImage: "xmark.circle", tint: .red) { presenter.end() }
             sep
@@ -400,6 +456,7 @@ struct PresentationToolbar: View {
             }
             sep
             RibbonButton(title: "上一页", systemImage: "chevron.left") { presenter.previous() }
+                .disabled(doc.currentIndex == 0)
             Button { presenter.showPages.toggle() } label: {
                 Text("\(doc.currentIndex + 1)/\(doc.slideCount)")
                     .font(.system(size: 15, weight: .semibold).monospacedDigit())
@@ -408,16 +465,12 @@ struct PresentationToolbar: View {
             }
             .buttonStyle(.plain)
             .help("页面列表")
+            .accessibilityLabel("页面列表，第 \(doc.currentIndex + 1) 页，共 \(doc.slideCount) 页")
             RibbonButton(title: "下一页", systemImage: "chevron.right") { presenter.next() }
+                .disabled(doc.currentIndex == doc.slideCount - 1)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.15)))
-        .environment(\.colorScheme, .dark)
-        .padding(4)
         .fixedSize()
-        .coordinateSpace(name: Self.space)
-        .onPreferenceChange(FlyoutAnchorKey.self) { presenter.flyoutAnchors = $0 }
     }
 
     private static let space = "presentation-toolbar"

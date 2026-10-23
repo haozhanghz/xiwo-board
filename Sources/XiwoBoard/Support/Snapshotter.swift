@@ -38,8 +38,10 @@ enum Snapshotter {
                to: dir.appendingPathComponent("toolbar-820.png"))
 
         let presenter = PresentationController(document: doc, tools: app.tools, recorder: app.recorder)
-        render(PresentationToolbar(presenter: presenter).environmentObject(app.tools).environmentObject(app.recorder),
+        render(PresentationToolbar(presenter: presenter, maxWidth: 1900).environmentObject(app.tools).environmentObject(app.recorder),
                size: nil, to: dir.appendingPathComponent("present-toolbar.png"))
+        render(PresentationToolbar(presenter: presenter, maxWidth: 1000).environmentObject(app.tools).environmentObject(app.recorder),
+               size: nil, to: dir.appendingPathComponent("present-toolbar-1000.png"))
         render(RecordingOptions(presenter: presenter).environmentObject(app.recorder).padding(14)
                 .background(Color(white: 0.2)).environment(\.colorScheme, .dark),
                size: nil, to: dir.appendingPathComponent("record-options.png"))

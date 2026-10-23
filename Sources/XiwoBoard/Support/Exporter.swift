@@ -22,6 +22,7 @@ enum Exporter {
     }
 
     static func exportPDF(_ doc: DocumentModel) {
+        doc.finishEditing()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = doc.title + ".pdf"
@@ -31,6 +32,7 @@ enum Exporter {
 
     /// Exports every page as numbered PNGs into a chosen folder.
     static func exportImages(_ doc: DocumentModel) {
+        doc.finishEditing()
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -47,6 +49,7 @@ enum Exporter {
     }
 
     static func exportEnbx(_ doc: DocumentModel) {
+        doc.finishEditing()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.enbx]
         panel.nameFieldStringValue = doc.title + ".enbx"
@@ -57,6 +60,7 @@ enum Exporter {
     /// Returns false if the user cancelled.
     @discardableResult
     static func save(_ doc: DocumentModel, forceChoose: Bool = false) -> Bool {
+        doc.finishEditing()
         var url = doc.fileURL
         if url == nil || forceChoose {
             let panel = NSSavePanel()
