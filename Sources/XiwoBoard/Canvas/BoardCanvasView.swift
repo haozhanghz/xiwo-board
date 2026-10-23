@@ -46,6 +46,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private var laserTimer: Timer?
     private var lastDragTime: TimeInterval = 0
     private var lastDragPoint: CGPoint = .zero
+    private var tabletPressure = PenPressureFilter()
 
     private var editor: NSTextView?
     private var editingID: String?
@@ -68,6 +69,20 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
                 self.needsDisplay = true
             }
         }.store(in: &cancellables)
+        TabletInput.shared.start()
+        NotificationCenter.default.publisher(for: .tabletProximityChanged).sink { [weak self] _ in
+            guard let self else { return }
+            self.window?.invalidateCursorRects(for: self)
+            self.needsDisplay = true
+        }.store(in: &cancellables)
+    }
+
+    /// The tool a press acts with: turning a tablet pen over to its eraser end
+    /// (or holding a side button set to "eraser" in the tablet driver) erases
+    /// while the pen tool is selected, without changing the toolbar choice.
+    private var activeTool: Tool {
+        if tools.tool == .pen, TabletInput.shared.isEraser { return .eraser }
+        return tools.tool
     }
 
     @available(*, unavailable)
@@ -222,7 +237,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private func drawOverlays(_ ctx: CGContext) {
         guard let p = pointer else { return }
         let vp = toView(p)
-        switch tools.tool {
+        switch activeTool {
         case .eraser:
             let r = tools.eraserSize / 2 * scale
             ctx.setStrokeColor(NSColor.gray.cgColor)
@@ -287,7 +302,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     override func resetCursorRects() {
         let cursor: NSCursor
-        switch tools.tool {
+        switch activeTool {
         case .pen, .shape: cursor = .crosshair
         case .text: cursor = .iBeam
         case .laser, .spotlight, .magnifier, .eraser: cursor = NSCursor(image: NSImage(size: NSSize(width: 1, height: 1)), hotSpot: .zero)
@@ -301,7 +316,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     override func mouseMoved(with event: NSEvent) {
         pointer = toSlide(convert(event.locationInWindow, from: nil))
         if tools.tool == .laser { recordLaser() }
-        if tools.tool.isOverlay || tools.tool == .eraser { needsDisplay = true }
+        if activeTool.isOverlay || activeTool == .eraser { needsDisplay = true }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -317,7 +332,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         lastDragTime = event.timestamp
         if editingID != nil { endEditing() }
 
-        switch tools.tool {
+        switch activeTool {
         case .pen:
             drag = .drawing([StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))])
         case .eraser:
@@ -489,10 +504,37 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        // A pen side button (XPPen maps one to right-click by default) erases
+        // while writing, so the teacher need not go back to the toolbar.
+        if tools.tool == .pen, event.isFromTablet {
+            window?.makeFirstResponder(self)
+            if editingID != nil { endEditing() }
+            let p = toSlide(convert(event.locationInWindow, from: nil))
+            pointer = p
+            document.beginGesture()
+            drag = .erasing
+            erase(at: p)
+            needsDisplay = true
+            return
+        }
         guard mode == .edit else { return super.rightMouseDown(with: event) }
         let p = toSlide(convert(event.locationInWindow, from: nil))
         if let hit = topElement(at: p), !document.selection.contains(hit.id) { document.selection = [hit.id] }
         NSMenu.popUpContextMenu(contextMenu(), with: event, for: self)
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        guard case .erasing = drag else { return super.rightMouseDragged(with: event) }
+        let p = toSlide(convert(event.locationInWindow, from: nil))
+        pointer = p
+        erase(at: p)
+        needsDisplay = true
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard case .erasing = drag else { return super.rightMouseUp(with: event) }
+        drag = .none
+        needsDisplay = true
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -548,8 +590,9 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     // MARK: Gesture helpers
 
     private func pressure(_ event: NSEvent, at p: CGPoint) -> Double {
-        if event.subtype == .tabletPoint || event.type == .tabletPoint {
-            return Double(max(0.05, event.pressure))
+        if event.isFromTablet {
+            if event.type == .leftMouseDown { tabletPressure.reset() }
+            return tabletPressure.next(Double(event.pressure))
         }
         guard tools.penKind == .brush else { return 1 }
         // Mouse/trackpad: thinner when moving fast, like a brush.
