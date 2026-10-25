@@ -73,6 +73,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private var lastDragTime: TimeInterval = 0
     private var lastDragPoint: CGPoint = .zero
     private var tabletPressure = PenPressureFilter()
+    /// Widths for the stroke being written when the hard pen has its nib on.
+    private var nib: PenNib?
     /// Pointer speed for the brush, smoothed over a few samples (slide units per second).
     private var brushSpeed: Double = 0
 
@@ -421,7 +423,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         switch tool {
         case .pen:
             brushSpeed = 0
-            let first = StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))
+            nib = tools.penKind == .pen && tools.penNib ? PenNib(width: tools.penWidth, scale: Double(scale)) : nil
+            let first = strokePoint(at: p, event)
             liveStrokePoints = [first]
             drag = .drawing
             inkOnGPU = liveInk?.begin(color: tools.penColor, width: tools.penWidth, kind: tools.penKind,
@@ -520,7 +523,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         case .drawing:
             let last = liveStrokePoints.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
             if hypot(p.x - last.x, p.y - last.y) >= 0.8 / scale {
-                let point = StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))
+                let point = strokePoint(at: p, event)
                 liveStrokePoints.append(point)
                 if inkOnGPU { liveInk?.append(point) } else { setNeedsDisplay(liveInkDirtyRect()) }
             }
@@ -578,8 +581,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     override func mouseUp(with event: NSEvent) {
         switch drag {
         case .drawing:
+            nib?.taper(&liveStrokePoints, liftedAt: event.timestamp)
+            nib = nil
             // Tight enough that the stored line does not visibly shift from the one drawn live.
-            let simplified = Geometry.simplify(liveStrokePoints, tolerance: min(0.35, 0.2 / scale))
+            let simplified = Geometry.simplify(liveStrokePoints, tolerance: min(0.35, 0.2 / scale), width: tools.penWidth)
             let stroke = BoardElement.stroke(points: simplified, color: tools.penColor, width: tools.penWidth, kind: tools.penKind)
             if !simplified.isEmpty { document.editSlide { $0.elements.append(stroke) } }
             if inkOnGPU {
@@ -697,6 +702,14 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
 
     // MARK: Gesture helpers
 
+    /// The point the pen adds to the stroke being written at `p`, with its pressure and,
+    /// with the nib on, its width.
+    private func strokePoint(at p: CGPoint, _ event: NSEvent) -> StrokePoint {
+        var point = StrokePoint(x: p.x, y: p.y, pressure: pressure(event, at: p))
+        point.widthScale = nib?.widthScale(at: p, time: event.timestamp, pressure: event.isFromTablet ? point.pressure : nil)
+        return point
+    }
+
     private func pressure(_ event: NSEvent, at p: CGPoint) -> Double {
         if event.isFromTablet {
             if event.type == .leftMouseDown { tabletPressure.reset() }
@@ -741,6 +754,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         receiveEverySample(false)
         if inkOnGPU { liveInk?.cancel() }
         inkOnGPU = false
+        nib = nil
         drag = .none
         liveStrokePoints.removeAll()
         needsDisplay = true

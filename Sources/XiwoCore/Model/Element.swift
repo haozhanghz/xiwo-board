@@ -6,12 +6,25 @@ public struct StrokePoint: Codable, Hashable, Sendable {
     public var y: Double
     /// Normalised pen pressure, 0...1. Mouse input reports 1.
     public var pressure: Double
+    /// The line's width here as a fraction of the stroke's width, written by a pen with a
+    /// nib (`PenNib`). Nil keeps the stroke's own width, as ink from before nibs does.
+    public var widthScale: Double?
 
-    public init(x: Double, y: Double, pressure: Double = 1) {
-        self.x = x; self.y = y; self.pressure = pressure
+    public init(x: Double, y: Double, pressure: Double = 1, widthScale: Double? = nil) {
+        self.x = x; self.y = y; self.pressure = pressure; self.widthScale = widthScale
     }
 
     public var cgPoint: CGPoint { CGPoint(x: x, y: y) }
+
+    /// The same point, moved.
+    public func offsetBy(dx: Double, dy: Double) -> StrokePoint {
+        var p = self
+        p.x += dx; p.y += dy
+        return p
+    }
+
+    // Every point of a stroke stores its width, so the key is short.
+    private enum CodingKeys: String, CodingKey { case x, y, pressure, widthScale = "w" }
 }
 
 public enum PenKind: String, Codable, CaseIterable, Sendable {
@@ -32,6 +45,15 @@ public struct Stroke: Codable, Hashable, Sendable {
 
     public init(points: [StrokePoint], color: RGBA, width: Double, kind: PenKind = .pen) {
         self.points = points; self.color = color; self.width = width; self.kind = kind
+    }
+
+    /// A hard pen whose width changes along the line (笔锋).
+    public var hasNib: Bool { kind == .pen && points.contains { $0.widthScale != nil } }
+
+    /// How far the ink reaches out from its points: half the widest the line gets.
+    public var reach: Double {
+        guard hasNib else { return width / 2 }
+        return width / 2 * points.reduce(1) { max($0, $1.widthScale ?? 1) }
     }
 }
 

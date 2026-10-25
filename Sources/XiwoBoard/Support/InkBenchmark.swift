@@ -39,7 +39,7 @@ enum InkBenchmark {
 
     static func run() {
         let screen = NSScreen.main ?? NSScreen.screens[0]
-        print("screen \(Int(screen.frame.width))×\(Int(screen.frame.height)) @\(screen.backingScaleFactor)x")
+        print("screen \(Int(screen.frame.width))×\(Int(screen.frame.height)) @\(screen.backingScaleFactor)x, hard pen \(ToolState.savedPenNib ? "with" : "without") nib")
         pageRender(pixelWidth: Int(screen.frame.width * screen.backingScaleFactor))
         for metal in [false, true] {
             BoardCanvasView.metalInk = metal

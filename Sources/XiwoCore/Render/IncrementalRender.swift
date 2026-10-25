@@ -39,10 +39,12 @@ extension SlideRenderer {
     /// stroke being written: the smoothed line only re-bends its last two segments and
     /// brush widths only look one point back, so the last three points bound it.
     public static func liveStrokeTail(_ points: [StrokePoint], width: Double, kind: PenKind) -> CGRect {
-        let r = points.suffix(3).reduce(CGRect.null) { $0.union(CGRect(x: $1.x, y: $1.y, width: 0, height: 0)) }
-        // Square highlighter caps reach further out at their corners than half the width;
-        // one more unit covers antialiasing.
-        let pad = width * (kind == .highlighter ? 0.75 : 0.5) + 1
+        let tail = points.suffix(3)
+        let r = tail.reduce(CGRect.null) { $0.union(CGRect(x: $1.x, y: $1.y, width: 0, height: 0)) }
+        // Square highlighter caps reach further out at their corners than half the width,
+        // and a nib can widen the pen at these points; one more unit covers antialiasing.
+        let nib = kind == .pen ? tail.reduce(1) { max($0, $1.widthScale ?? 1) } : 1
+        let pad = width * (kind == .highlighter ? 0.75 : 0.5 * nib) + 1
         return r.insetBy(dx: -pad, dy: -pad)
     }
 

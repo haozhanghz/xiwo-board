@@ -33,6 +33,10 @@ final class ToolState: ObservableObject {
     @Published var penColor: RGBA = .red
     @Published var penWidth: Double = 4
     @Published var penKind: PenKind = .pen
+    /// The hard pen writes with a nib (笔锋): thinner when fast, pointed when flicked off.
+    @Published var penNib = ToolState.savedPenNib {
+        didSet { UserDefaults.standard.set(penNib, forKey: "PenNib") }
+    }
     @Published var eraserSize: Double = 40
     @Published var eraserMode: EraserMode = .area
     @Published var shapeStyle = ShapeAppearance(stroke: RGBA(0.13, 0.45, 0.95), fill: nil, lineWidth: 4)
@@ -41,4 +45,6 @@ final class ToolState: ObservableObject {
     @Published var magnifierZoom: Double = 2
 
     static let penWidths: [Double] = [1, 2, 4, 8, 14, 24]
+    /// The nib as last set; on until someone turns it off.
+    static var savedPenNib: Bool { UserDefaults.standard.object(forKey: "PenNib") as? Bool ?? true }
 }

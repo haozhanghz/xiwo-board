@@ -181,18 +181,19 @@ final class LiveInkView: NSView {
 }
 
 /// One `InkSegment` as the shader reads it.
-private struct InkPiece {
-    var ax, ay, bx, by, width: Float
+struct InkPiece {
+    var ax, ay, bx, by, width, endWidth: Float
     /// Bit 0: square start, bit 1: square end.
     var caps: UInt32
 
     init(_ s: InkSegment) {
-        ax = Float(s.a.x); ay = Float(s.a.y); bx = Float(s.b.x); by = Float(s.b.y); width = Float(s.width)
+        ax = Float(s.a.x); ay = Float(s.a.y); bx = Float(s.b.x); by = Float(s.b.y)
+        width = Float(s.width); endWidth = Float(s.endWidth)
         caps = (s.squareStart ? 1 : 0) | (s.squareEnd ? 2 : 0)
     }
 }
 
-private struct InkUniforms {
+struct InkUniforms {
     /// Premultiplied.
     var color: SIMD4<Float>
     /// Drawable size in pixels.
@@ -305,7 +306,7 @@ private final class InkFrames: @unchecked Sendable {
         let count = scene.pieces.count
         // Copied while locked, so the main thread is never left copying an array this thread still holds.
         let buffer = count > 0 ? fill(scene.pieces) : nil
-        var u = InkUniforms(color: scene.color, viewport: SIMD2(Float(w), Float(h)), origin: scene.origin, scale: scene.scale)
+        let u = InkUniforms(color: scene.color, viewport: SIMD2(Float(w), Float(h)), origin: scene.origin, scale: scene.scale)
         let clip = scene.clip, pipeline = scene.pipeline, serial = scene.serial, points = scene.points
         let observer = self.observer
         condition.unlock()
@@ -322,12 +323,8 @@ private final class InkFrames: @unchecked Sendable {
             let x0 = Int(max(0, min(Double(w), clip.minX.rounded(.down)))), y0 = Int(max(0, min(Double(h), clip.minY.rounded(.down))))
             let x1 = Int(max(Double(x0), min(Double(w), clip.maxX.rounded(.up)))), y1 = Int(max(Double(y0), min(Double(h), clip.maxY.rounded(.up))))
             if let buffer, let pipeline, x1 > x0, y1 > y0 {
-                encoder.setRenderPipelineState(pipeline)
                 encoder.setScissorRect(MTLScissorRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0))
-                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-                encoder.setVertexBytes(&u, length: MemoryLayout<InkUniforms>.stride, index: 1)
-                encoder.setFragmentBytes(&u, length: MemoryLayout<InkUniforms>.stride, index: 1)
-                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
+                encodeInk(buffer, count: count, uniforms: u, pipeline: pipeline, into: encoder)
             }
             encoder.endEncoding()
         }
@@ -375,25 +372,10 @@ final class InkRenderer {
     /// Compiles the shaders in the background; the app builds with SwiftPM, which has no Metal step.
     private func compile() {
         device.makeLibrary(source: Self.shaderSource, options: nil) { [weak self] library, error in
-            guard let library, let vertex = library.makeFunction(name: "inkVertex"),
-                  let fragment = library.makeFunction(name: "inkFragment") else {
+            guard let library, let d = Self.pipelineDescriptor(library) else {
                 log.error("Live ink shaders did not compile: \(String(describing: error), privacy: .public)")
                 return
             }
-            let d = MTLRenderPipelineDescriptor()
-            d.vertexFunction = vertex
-            d.fragmentFunction = fragment
-            let c = d.colorAttachments[0]!
-            c.pixelFormat = .bgra8Unorm
-            // Pieces overlap at every joint. Taking the larger value instead of blending them
-            // keeps a translucent highlighter one even tint, like a single Core Graphics stroke.
-            c.isBlendingEnabled = true
-            c.rgbBlendOperation = .max
-            c.alphaBlendOperation = .max
-            c.sourceRGBBlendFactor = .one
-            c.destinationRGBBlendFactor = .one
-            c.sourceAlphaBlendFactor = .one
-            c.destinationAlphaBlendFactor = .one
             let device = library.device
             device.makeRenderPipelineState(descriptor: d) { state, error in
                 guard let state else {
@@ -405,7 +387,29 @@ final class InkRenderer {
         }
     }
 
-    private static let shaderSource = """
+    /// The pipeline for `shaderSource` compiled into `library`.
+    nonisolated static func pipelineDescriptor(_ library: MTLLibrary) -> MTLRenderPipelineDescriptor? {
+        guard let vertex = library.makeFunction(name: "inkVertex"), let fragment = library.makeFunction(name: "inkFragment") else {
+            return nil
+        }
+        let d = MTLRenderPipelineDescriptor()
+        d.vertexFunction = vertex
+        d.fragmentFunction = fragment
+        let c = d.colorAttachments[0]!
+        c.pixelFormat = .bgra8Unorm
+        // Pieces overlap at every joint. Taking the larger value instead of blending them
+        // keeps a translucent highlighter one even tint, like a single Core Graphics stroke.
+        c.isBlendingEnabled = true
+        c.rgbBlendOperation = .max
+        c.alphaBlendOperation = .max
+        c.sourceRGBBlendFactor = .one
+        c.destinationRGBBlendFactor = .one
+        c.sourceAlphaBlendFactor = .one
+        c.destinationAlphaBlendFactor = .one
+        return d
+    }
+
+    nonisolated static let shaderSource = """
     #include <metal_stdlib>
     using namespace metal;
 
@@ -413,6 +417,7 @@ final class InkRenderer {
         packed_float2 a;
         packed_float2 b;
         float width;
+        float endWidth;
         uint caps;
     };
 
@@ -429,6 +434,7 @@ final class InkRenderer {
         float2 a [[flat]];
         float2 b [[flat]];
         float r [[flat]];
+        float rb [[flat]];
         uint caps [[flat]];
     };
 
@@ -438,12 +444,13 @@ final class InkRenderer {
         float2 a = u.origin + float2(s.a) * u.scale;
         float2 b = u.origin + float2(s.b) * u.scale;
         float r = s.width * 0.5 * u.scale;
+        float rb = s.endWidth * 0.5 * u.scale;
         float2 d = b - a;
         float len = length(d);
         float2 dir = len > 1e-3 ? d / len : float2(1, 0);
         float2 nrm = float2(-dir.y, dir.x);
         // The quad around the piece, one pixel wider all round for antialiasing.
-        float e = r + 1.0;
+        float e = max(r, rb) + 1.0;
         float2 corner = float2((vid & 1) ? len + e : -e, (vid & 2) ? e : -e);
         float2 p = a + dir * corner.x + nrm * corner.y;
         Fragment f;
@@ -452,6 +459,7 @@ final class InkRenderer {
         f.a = a;
         f.b = b;
         f.r = r;
+        f.rb = rb;
         f.caps = s.caps;
         return f;
     }
@@ -461,7 +469,41 @@ final class InkRenderer {
         return saturate(min(t + 0.5, r) - max(t - 0.5, -r));
     }
 
+    // A piece of a pen with a nib: a disc of radius ra at a and one of rb at b, joined by
+    // the lines tangent to both. Covered like a line of the local radius, by distance to the edge.
+    static float cone(float2 p, float2 a, float2 b, float ra, float rb) {
+        float2 d = b - a;
+        float h = length(d);
+        float r, edge;
+        if (h <= abs(ra - rb)) {
+            // One end's disc holds the other's.
+            r = max(ra, rb);
+            edge = length(p - (ra >= rb ? a : b)) - r;
+        } else {
+            float2 dir = d / h;
+            float2 rel = p - a;
+            float2 q = float2(abs(dot(rel, float2(-dir.y, dir.x))), dot(rel, dir));
+            // The sides lean toward the narrower end; k is the sine of that angle.
+            float k = (ra - rb) / h, c = sqrt(1 - k * k);
+            float m = dot(q, float2(-k, c));
+            if (m < 0) {
+                r = ra;
+                edge = length(q) - ra;
+            } else if (m > c * h) {
+                r = rb;
+                edge = length(q - float2(0, h)) - rb;
+            } else {
+                r = mix(ra, rb, saturate(q.y / h));
+                edge = dot(q, float2(c, k)) - ra;
+            }
+        }
+        return band(edge + r, r);
+    }
+
     fragment float4 inkFragment(Fragment f [[stage_in]], constant Uniforms &u [[buffer(1)]]) {
+        if (f.r != f.rb) {
+            return u.color * cone(f.p, f.a, f.b, f.r, f.rb);
+        }
         float2 d = f.b - f.a;
         float len = length(d);
         float2 dir = len > 1e-3 ? d / len : float2(1, 0);
@@ -479,6 +521,17 @@ final class InkRenderer {
         return u.color * c;
     }
     """
+}
+
+/// Records `count` pieces from `buffer`, drawn with `pipeline`, into the pass `encoder` is recording.
+func encodeInk(_ buffer: MTLBuffer, count: Int, uniforms: InkUniforms, pipeline: MTLRenderPipelineState,
+               into encoder: MTLRenderCommandEncoder) {
+    var u = uniforms
+    encoder.setRenderPipelineState(pipeline)
+    encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+    encoder.setVertexBytes(&u, length: MemoryLayout<InkUniforms>.stride, index: 1)
+    encoder.setFragmentBytes(&u, length: MemoryLayout<InkUniforms>.stride, index: 1)
+    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
 }
 
 /// Runs `body` on the main thread once the current Core Animation transaction has been

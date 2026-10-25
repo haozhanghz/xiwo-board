@@ -187,6 +187,9 @@ struct PenSettings: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            // Stays in place for the other pens, so the popover keeps its size.
+            Toggle("笔锋（写快变细，提笔出锋）", isOn: $tools.penNib)
+                .disabled(tools.penKind != .pen)
             HStack(spacing: 0) {
                 ForEach(ToolState.penWidths, id: \.self) { w in
                     Button { tools.penWidth = tools.penKind == .highlighter ? w * 3 : w } label: {

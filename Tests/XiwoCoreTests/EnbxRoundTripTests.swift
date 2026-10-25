@@ -112,6 +112,11 @@ final class EnbxRoundTripTests: XCTestCase {
             "毛笔的粗细变化和荧光笔压在文字下面的效果不保留",
             "表格会变成纯文本",
         ])
+
+        let nib = BoardElement.stroke(points: [StrokePoint(x: 0, y: 0, widthScale: 1.1), StrokePoint(x: 10, y: 10, widthScale: 0.1)],
+                                      color: .red, width: 4, kind: .pen)
+        cw.slides[0] = Slide(elements: [nib])
+        XCTAssertEqual(EnbxExporter.losses(in: cw), ["笔迹会变成线条形状，之后不能再用橡皮擦除", "硬笔的笔锋不保留，线条会变得粗细一致"])
     }
 
     private func roundTrip(_ cw: Courseware) throws -> Courseware {

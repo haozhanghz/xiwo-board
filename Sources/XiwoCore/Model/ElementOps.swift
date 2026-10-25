@@ -4,11 +4,11 @@ import Foundation
 extension BoardElement {
     /// Creates an ink element from points in slide coordinates.
     public static func stroke(points: [StrokePoint], color: RGBA, width: Double, kind: PenKind) -> BoardElement {
-        let pad = width / 2 + 1
+        let pad = Stroke(points: points, color: color, width: width, kind: kind).reach + 1
         let xs = points.map(\.x), ys = points.map(\.y)
         let minX = (xs.min() ?? 0) - pad, minY = (ys.min() ?? 0) - pad
         let maxX = (xs.max() ?? 0) + pad, maxY = (ys.max() ?? 0) + pad
-        let local = points.map { StrokePoint(x: $0.x - minX, y: $0.y - minY, pressure: $0.pressure) }
+        let local = points.map { $0.offsetBy(dx: -minX, dy: -minY) }
         return BoardElement(frame: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY),
                             content: .stroke(Stroke(points: local, color: color, width: width, kind: kind)))
     }
@@ -16,7 +16,7 @@ extension BoardElement {
     /// Stroke points in slide coordinates (empty for non-ink elements).
     public var absoluteStrokePoints: [StrokePoint] {
         guard case .stroke(let s) = content else { return [] }
-        return s.points.map { StrokePoint(x: $0.x + frame.minX, y: $0.y + frame.minY, pressure: $0.pressure) }
+        return s.points.map { $0.offsetBy(dx: frame.minX, dy: frame.minY) }
     }
 
     public var center: CGPoint { CGPoint(x: frame.midX, y: frame.midY) }
@@ -39,7 +39,11 @@ extension BoardElement {
         let sy = old.height > 0 ? nf.height / old.height : 1
         switch content {
         case .stroke(var s):
-            s.points = s.points.map { StrokePoint(x: $0.x * sx, y: $0.y * sy, pressure: $0.pressure) }
+            s.points = s.points.map { p in
+                var q = p
+                q.x *= sx; q.y *= sy
+                return q
+            }
             content = .stroke(s)
         case .group(var children):
             for i in children.indices {
@@ -74,7 +78,7 @@ extension BoardElement {
         case .stroke(let s):
             guard frame.insetBy(dx: -tolerance, dy: -tolerance).contains(q) else { return false }
             let pts = s.points.map { CGPoint(x: $0.x + frame.minX, y: $0.y + frame.minY) }
-            let limit = s.width / 2 + tolerance
+            let limit = s.reach + tolerance
             if pts.count == 1 { return hypot(pts[0].x - q.x, pts[0].y - q.y) <= limit }
             for i in 1..<max(pts.count, 1) where Geometry.distance(q, segment: pts[i - 1], pts[i]) <= limit { return true }
             return false
@@ -93,7 +97,7 @@ extension BoardElement {
         let qa = unrotate(a), qb = unrotate(b)
         switch content {
         case .stroke(let s):
-            let limit = s.width / 2 + tolerance
+            let limit = s.reach + tolerance
             guard Geometry.bounds(qa, qb).insetBy(dx: -limit, dy: -limit).intersects(frame) else { return false }
             let pts = s.points.map { CGPoint(x: $0.x + frame.minX, y: $0.y + frame.minY) }
             if pts.count == 1 { return Geometry.distance(pts[0], segment: qa, qb) <= limit }
@@ -128,7 +132,7 @@ extension BoardElement {
     public func erasing(from start: CGPoint, to end: CGPoint, radius r: Double) -> [BoardElement] {
         guard case .stroke(let s) = content else { return [self] }
         let a = unrotate(start), b = unrotate(end)
-        let reach = max(0, r) + s.width / 2
+        let reach = max(0, r) + s.reach
         guard Geometry.bounds(a, b).insetBy(dx: -reach, dy: -reach).intersects(frame) else { return [self] }
         let pts = absoluteStrokePoints
         guard pts.count > 1 else {
@@ -140,7 +144,8 @@ extension BoardElement {
 
         func interpolate(_ a: StrokePoint, _ b: StrokePoint, _ t: Double) -> StrokePoint {
             StrokePoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t,
-                        pressure: a.pressure + (b.pressure - a.pressure) * t)
+                        pressure: a.pressure + (b.pressure - a.pressure) * t,
+                        widthScale: a.widthScale.map { $0 + ((b.widthScale ?? $0) - $0) * t })
         }
         func append(_ a: StrokePoint, _ b: StrokePoint) {
             if piece.last != a { piece.append(a) }
@@ -335,16 +340,25 @@ public enum Geometry {
         return enter < exit ? (enter, exit) : nil
     }
 
-    /// Ramer–Douglas–Peucker simplification, keeping pressure of retained points.
-    public static func simplify(_ pts: [StrokePoint], tolerance: Double) -> [StrokePoint] {
+    /// Ramer–Douglas–Peucker simplification, keeping pressure of retained points. Where
+    /// points carry a nib's width (`widthScale`, a fraction of `width`), a point also stays
+    /// if dropping it would move the edge of the line by more than `tolerance`.
+    public static func simplify(_ pts: [StrokePoint], tolerance: Double, width: Double = 0) -> [StrokePoint] {
         guard pts.count > 2 else { return pts }
         var keep = [Bool](repeating: false, count: pts.count)
         keep[0] = true; keep[pts.count - 1] = true
         var stack = [(0, pts.count - 1)]
         while let (s, e) = stack.popLast() {
             var maxD = 0.0, idx = s
+            let a = pts[s], b = pts[e]
+            let dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy
             for i in (s + 1)..<e {
-                let d = distance(pts[i].cgPoint, segment: pts[s].cgPoint, pts[e].cgPoint)
+                var d = distance(pts[i].cgPoint, segment: a.cgPoint, b.cgPoint)
+                if let w = pts[i].widthScale, let wa = a.widthScale, let wb = b.widthScale {
+                    // Without the point, the width would run straight from one kept end to the other.
+                    let t = len2 > 0 ? max(0, min(1, ((pts[i].x - a.x) * dx + (pts[i].y - a.y) * dy) / len2)) : 0
+                    d = max(d, abs(w - (wa + (wb - wa) * t)) * width / 2)
+                }
                 if d > maxD { maxD = d; idx = i }
             }
             if maxD > tolerance { keep[idx] = true; stack.append((s, idx)); stack.append((idx, e)) }

@@ -54,6 +54,7 @@ public enum EnbxExporter {
             case .stroke(let s):
                 note("笔迹会变成线条形状，之后不能再用橡皮擦除")
                 if s.kind != .pen { note("毛笔的粗细变化和荧光笔压在文字下面的效果不保留") }
+                if s.hasNib { note("硬笔的笔锋不保留，线条会变得粗细一致") }
             case .table:
                 note("表格会变成纯文本")
             case .media(let m) where m.autoPlay || m.loop:

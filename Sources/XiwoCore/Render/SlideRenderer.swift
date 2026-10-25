@@ -193,6 +193,8 @@ public enum SlideRenderer {
         guard !pts.isEmpty else { return }
         ctx.saveGState(); defer { ctx.restoreGState() }
         switch s.kind {
+        case .pen where s.hasNib:
+            drawNib(s, origin: origin, in: ctx)
         case .pen, .highlighter:
             let color = s.kind == .highlighter ? s.color.withAlpha(min(s.color.a, 0.4)) : s.color
             if pts.count == 1 {
@@ -226,6 +228,21 @@ public enum SlideRenderer {
         }
         p.addLine(to: pts[pts.count - 1])
         return p
+    }
+
+    /// A pen with a nib (笔锋): the very pieces the live ink was drawn with, filled as one
+    /// shape, so the line keeps its look when the pen lifts.
+    static func drawNib(_ s: Stroke, origin: CGPoint, in ctx: CGContext) {
+        // As fine as the live ink: a tenth of a pixel of wherever this is drawn.
+        let m = ctx.ctm
+        let pixels = Double(sqrt(abs(m.a * m.d - m.b * m.c)))
+        let path = CGMutablePath()
+        for piece in InkTessellator.segments(of: s, origin: origin, tolerance: 0.1 / max(pixels, 0.01)) {
+            piece.addOutline(to: path)
+        }
+        ctx.setFillColor(s.color.cgColor)
+        ctx.addPath(path)
+        ctx.fillPath()
     }
 
     /// Brush pen: each segment is stroked at the width its pressure gives, with

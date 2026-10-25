@@ -239,22 +239,41 @@ final class XiwoCoreTests: XCTestCase {
             }
             return worst
         }
-        let pts = (0..<24).map { (i: Int) -> StrokePoint in
-            let t = Double(i)
-            let x: Double = 30 + t * 8 + sin(t) * 6
-            let y: Double = 80 + cos(t * 0.7) * 45
-            return StrokePoint(x: x, y: y, pressure: 0.3 + 0.7 * abs(sin(t * 0.9)))
-        }
-        for kind in PenKind.allCases {
+        let pts = Self.wavyStroke
+        for (kind, nib) in Self.inkKinds {
             let width = kind == .highlighter ? 20.0 : 8.0
+            let stroke = nib ? Self.withNib(pts) : pts
             var before = render([], width: width, kind: kind)
-            for n in 1...pts.count {
-                let live = Array(pts[0..<n])
+            for n in 1...stroke.count {
+                let live = Array(stroke[0..<n])
                 let after = render(live, width: width, kind: kind)
                 let tail = SlideRenderer.liveStrokeTail(live, width: width, kind: kind)
-                XCTAssertLessThanOrEqual(changeOutside(tail, before, after), 1, "\(kind) point \(n)")
+                // A nib's pieces are filled as one shape, and as it grows Core Graphics
+                // antialiases the rest of its edge up to two levels differently.
+                XCTAssertLessThanOrEqual(changeOutside(tail, before, after), nib ? 2 : 1, "\(kind)\(nib ? " with nib" : "") point \(n)")
                 before = after
             }
+        }
+    }
+
+    /// A wavy line with changing pressure, as a tablet writes it.
+    static let wavyStroke = (0..<24).map { (i: Int) -> StrokePoint in
+        let t = Double(i)
+        let x: Double = 30 + t * 8 + sin(t) * 6
+        let y: Double = 80 + cos(t * 0.7) * 45
+        return StrokePoint(x: x, y: y, pressure: 0.3 + 0.7 * abs(sin(t * 0.9)))
+    }
+
+    /// Every pen, and the hard pen once more with a nib.
+    static let inkKinds = PenKind.allCases.map { ($0, false) } + [(PenKind.pen, true)]
+
+    /// `points` written with a nib: swelling and thinning, then narrowing to a point.
+    static func withNib(_ points: [StrokePoint]) -> [StrokePoint] {
+        points.enumerated().map { i, p in
+            var q = p
+            let end = max(0.1, min(1, Double(points.count - 1 - i) / 5))
+            q.widthScale = (0.6 + 0.6 * abs(sin(Double(i) * 0.5))) * end
+            return q
         }
     }
 
@@ -312,17 +331,47 @@ final class XiwoCoreTests: XCTestCase {
         /// has round ends unless marked square, and the larger value where pieces overlap.
         func shader(_ pieces: [InkSegment]) -> [Double] {
             func band(_ t: Double, _ r: Double) -> Double { max(0, min(1, min(t + 0.5, r) - max(t - 0.5, -r))) }
+            /// A nib's piece: discs of radius ra at a and rb at b joined by their tangents,
+            /// covered like a line of the local radius, by distance to the edge.
+            func cone(_ px: Double, _ py: Double, _ ax: Double, _ ay: Double, _ bx: Double, _ by: Double,
+                      _ ra: Double, _ rb: Double) -> Double {
+                let len = hypot(bx - ax, by - ay)
+                let r: Double, edge: Double
+                if len <= abs(ra - rb) {
+                    r = max(ra, rb)
+                    edge = ra >= rb ? hypot(px - ax, py - ay) - r : hypot(px - bx, py - by) - r
+                } else {
+                    let dx = (bx - ax) / len, dy = (by - ay) / len
+                    let qx = abs(-(px - ax) * dy + (py - ay) * dx), qy = (px - ax) * dx + (py - ay) * dy
+                    let k = (ra - rb) / len, c = (1 - k * k).squareRoot()
+                    let m = -k * qx + c * qy
+                    if m < 0 {
+                        r = ra; edge = hypot(qx, qy) - ra
+                    } else if m > c * len {
+                        r = rb; edge = hypot(qx, qy - len) - rb
+                    } else {
+                        r = ra + (rb - ra) * max(0, min(1, qy / len)); edge = c * qx + k * qy - ra
+                    }
+                }
+                return band(edge + r, r)
+            }
             var cover = [Double](repeating: 0, count: w * h)
             for s in pieces {
                 let ax = s.a.x * scale, ay = s.a.y * scale, bx = s.b.x * scale, by = s.b.y * scale, r = s.width / 2 * scale
+                let rb = s.endWidth / 2 * scale
                 let len = hypot(bx - ax, by - ay)
                 let (dx, dy) = len > 1e-3 ? ((bx - ax) / len, (by - ay) / len) : (1.0, 0.0)
                 // Square ends reach out to their corners, r·√2 from the end point.
-                let m = r * 1.5 + 2
+                let m = max(r, rb) * 1.5 + 2
                 let cols = max(0, Int(min(ax, bx) - m))...min(w - 1, Int(max(ax, bx) + m))
                 let rows = max(0, Int(min(ay, by) - m))...min(h - 1, Int(max(ay, by) + m))
                 for row in rows {
                     for col in cols {
+                        if r != rb {
+                            let c = cone(Double(col) + 0.5, Double(row) + 0.5, ax, ay, bx, by, r, rb)
+                            cover[row * w + col] = max(cover[row * w + col], c)
+                            continue
+                        }
                         let px = Double(col) + 0.5 - ax, py = Double(row) + 0.5 - ay
                         let along = px * dx + py * dy, across = abs(-px * dy + py * dx)
                         let c: Double
@@ -340,14 +389,9 @@ final class XiwoCoreTests: XCTestCase {
             }
             return cover
         }
-        let pts = (0..<24).map { (i: Int) -> StrokePoint in
-            let t = Double(i)
-            let x: Double = 30 + t * 8 + sin(t) * 6
-            let y: Double = 80 + cos(t * 0.7) * 45
-            return StrokePoint(x: x, y: y, pressure: 0.3 + 0.7 * abs(sin(t * 0.9)))
-        }
-        for kind in PenKind.allCases {
+        for (kind, nib) in Self.inkKinds {
             let width = kind == .highlighter ? 20.0 : 8.0
+            let pts = nib ? Self.withNib(Self.wavyStroke) : Self.wavyStroke
             // Fewer points too: a dot, a straight line and the first curve take their own paths.
             for n in [1, 2, 3, 5, pts.count] {
                 let stroke = Stroke(points: Array(pts[0..<n]), color: .black, width: width, kind: kind)
@@ -360,9 +404,11 @@ final class XiwoCoreTests: XCTestCase {
                     total += abs(a[i] - b[i])
                     inked += 1
                 }
-                // Edge pixels are antialiased a little differently; nothing more.
-                XCTAssertLessThan(worst, 0.3, "\(kind), \(n) points")
-                XCTAssertLessThan(total / Double(max(1, inked)), 0.02, "\(kind), \(n) points")
+                // Edge pixels are antialiased a little differently; nothing more. Where two
+                // parts of the line nearly touch, as in the narrow turns of the wider nib line,
+                // the shader keeps the larger of their coverages and Core Graphics adds them.
+                XCTAssertLessThan(worst, nib ? 0.35 : 0.3, "\(kind)\(nib ? " with nib" : ""), \(n) points")
+                XCTAssertLessThan(total / Double(max(1, inked)), 0.02, "\(kind)\(nib ? " with nib" : ""), \(n) points")
             }
         }
     }
