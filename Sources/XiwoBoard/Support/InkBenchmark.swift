@@ -3,19 +3,24 @@ import QuartzCore
 import XiwoCore
 
 /// `XiwoBoard --ink-bench` writes synthetic handwriting into an offscreen canvas
-/// and prints how long each pen move and each pen-up takes to draw, so changes to
-/// the ink path can be compared on real hardware without touching the screen.
+/// and prints how long each pen move and each pen-up takes on the main thread, with
+/// live ink drawn into the canvas (CG) and on the Metal layer, so changes to the ink
+/// path can be compared on real hardware without touching the screen.
+/// `--ink-latency` measures on screen instead, see `InkLatency`.
 @MainActor
 enum InkBenchmark {
-    static let isRequested = CommandLine.arguments.contains("--ink-bench")
+    static let isRequested = CommandLine.arguments.contains("--ink-bench") || CommandLine.arguments.contains("--ink-latency")
 
     static func runIfRequested() -> Bool {
         guard isRequested else { return false }
-        NSApp.setActivationPolicy(.prohibited)
+        let latency = CommandLine.arguments.contains("--ink-latency")
+        // The latency run puts its canvas on screen; the benchmark keeps everything offscreen.
+        NSApp.setActivationPolicy(latency ? .accessory : .prohibited)
         NSApp.windows.forEach { $0.orderOut(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated {
                 NSApp.windows.forEach { $0.orderOut(nil) }
+                if latency { InkLatency.start(); return }
                 run()
                 exit(0)
             }
@@ -36,15 +41,18 @@ enum InkBenchmark {
         let screen = NSScreen.main ?? NSScreen.screens[0]
         print("screen \(Int(screen.frame.width))×\(Int(screen.frame.height)) @\(screen.backingScaleFactor)x")
         pageRender(pixelWidth: Int(screen.frame.width * screen.backingScaleFactor))
-        for (mode, size) in [(BoardCanvasView.Mode.present, screen.frame.size), (.edit, CGSize(width: 1200, height: 760))] {
-            for kind in PenKind.allCases {
-                let s = bench(mode: mode, size: size, kind: kind, scale: screen.backingScaleFactor)
-                let area = size.width * size.height
-                print(String(format: "%@ %-11@ move avg %.2f p95 %.2f max %.2f ms | pen-up avg %.2f max %.2f ms | %.0f%% of view, %.2f ms per draw, %.2f ms CA commit per frame",
-                             mode == .present ? "present" : "edit   ", kind.rawValue,
-                             avg(s.moves), pct(s.moves, 0.95), s.moves.max() ?? 0, avg(s.ups), s.ups.max() ?? 0,
-                             s.draws > 0 ? 100 * s.drawnPixels / Double(s.draws) / area : 0,
-                             s.draws > 0 ? s.drawTime / Double(s.draws) : 0, s.commitTime / Double(max(1, s.moves.count + s.ups.count))))
+        for metal in [false, true] {
+            BoardCanvasView.metalInk = metal
+            for (mode, size) in [(BoardCanvasView.Mode.present, screen.frame.size), (.edit, CGSize(width: 1200, height: 760))] {
+                for kind in PenKind.allCases {
+                    let s = bench(mode: mode, size: size, kind: kind, scale: screen.backingScaleFactor)
+                    let area = size.width * size.height
+                    print(String(format: "%@ %@ %-11@ move avg %.2f p95 %.2f max %.2f ms | pen-up avg %.2f max %.2f ms | %d draws, %.0f%% of view, %.2f ms per draw, %.2f ms CA commit per event",
+                                 metal ? "metal" : "cg   ", mode == .present ? "present" : "edit   ", kind.rawValue,
+                                 avg(s.moves), pct(s.moves, 0.95), s.moves.max() ?? 0, avg(s.ups), s.ups.max() ?? 0, s.draws,
+                                 s.draws > 0 ? 100 * s.drawnPixels / Double(s.draws) / area : 0,
+                                 s.draws > 0 ? s.drawTime / Double(s.draws) : 0, s.commitTime / Double(max(1, s.moves.count + s.ups.count))))
+                }
             }
         }
     }
@@ -64,6 +72,8 @@ enum InkBenchmark {
         window.orderFrontRegardless()
         defer { window.orderOut(nil) }
         flush(canvas)
+        let ready = Date().addingTimeInterval(5)
+        while canvas.liveInk.map({ !$0.isReady }) ?? false, Date() < ready { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
 
         var stats = Stats()
         flushTime = 0
@@ -94,23 +104,36 @@ enum InkBenchmark {
         return stats
     }
 
-    /// Cost of putting one new stroke on the cached page: patching vs rendering it again.
+    /// Cost of putting one new stroke on the cached page: rendering it again, patching a
+    /// copy of the old image, or patching the page bitmap in place.
     static func pageRender(pixelWidth: Int) {
         let cw = busySlide()
         let old = cw.slides[0]
-        guard let base = SlideRenderer.image(of: old, courseware: cw, pixelWidth: pixelWidth) else { return }
-        var full: [Double] = [], patch: [Double] = []
+        guard let base = SlideRenderer.image(of: old, courseware: cw, pixelWidth: pixelWidth),
+              let bitmap = SlideRenderer.bitmap(of: old, courseware: cw, pixelWidth: pixelWidth) else { return }
+        var full: [Double] = [], patch: [Double] = [], inPlace: [Double] = []
+        var page = old
         for (i, stroke) in handwriting().prefix(40).enumerated() {
+            let ink = BoardElement.stroke(points: stroke.map { StrokePoint(x: $0.x, y: $0.y) }, color: .red, width: 4, kind: .pen)
             var new = old
-            new.elements.append(.stroke(points: stroke.map { StrokePoint(x: $0.x, y: $0.y) }, color: .red, width: 4, kind: .pen))
+            new.elements.append(ink)
             var t = CACurrentMediaTime()
             _ = SlideRenderer.image(of: new, courseware: cw, pixelWidth: pixelWidth)
             if i > 0 { full.append((CACurrentMediaTime() - t) * 1000) }
             t = CACurrentMediaTime()
             _ = SlideRenderer.image(updating: base, from: old, to: new, courseware: cw)
             if i > 0 { patch.append((CACurrentMediaTime() - t) * 1000) }
+            // In place the page keeps every stroke, as it does while teaching.
+            var next = page
+            next.elements.append(ink)
+            t = CACurrentMediaTime()
+            _ = SlideRenderer.update(bitmap, from: page, to: next, courseware: cw)
+            _ = bitmap.makeImage()
+            if i > 0 { inPlace.append((CACurrentMediaTime() - t) * 1000) }
+            page = next
         }
-        print(String(format: "page %d px wide: full render avg %.2f ms, patch avg %.2f ms", pixelWidth, avg(full), avg(patch)))
+        print(String(format: "page %d px wide: full render avg %.2f ms, patched copy avg %.2f ms, patched in place avg %.2f ms",
+                     pixelWidth, avg(full), avg(patch), avg(inPlace)))
     }
 
     private static var flushTime: Double = 0

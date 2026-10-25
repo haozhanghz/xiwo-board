@@ -37,7 +37,8 @@
 ./scripts/build-app.sh          # 生成 build/XiwoBoard.app（arm64；本地构建是 ad-hoc 签名，发布包用项目证书，见 docs/SIGNING.md）
 open build/XiwoBoard.app
 swift test                      # 核心库单元测试
-build/XiwoBoard.app/Contents/MacOS/XiwoBoard --ink-bench   # 在屏幕外模拟写字，打印每次移动和抬笔的绘制耗时
+build/XiwoBoard.app/Contents/MacOS/XiwoBoard --ink-bench   # 在屏幕外模拟写字，打印每次移动和抬笔占用主线程的时间
+build/XiwoBoard.app/Contents/MacOS/XiwoBoard --ink-latency # 全屏模拟 240 Hz 数位板写字约半分钟，打印每个笔点从事件到上屏的延迟
 ```
 
 每次推送和 PR，GitHub Actions 都会在 Apple 芯片的 macOS 机器上编译、测试并打包。

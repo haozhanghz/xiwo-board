@@ -258,6 +258,115 @@ final class XiwoCoreTests: XCTestCase {
         }
     }
 
+    /// The canvas keeps its page bitmap and patches it in place after every stroke or
+    /// eraser pass, so after a run of edits it still has to match a full render.
+    func testInPlaceUpdateMatchesFullRender() throws {
+        let cw = sampleCourseware()
+        var slide = cw.slides[0]
+        let ctx = try XCTUnwrap(SlideRenderer.bitmap(of: slide, courseware: cw, pixelWidth: 640))
+        let edits: [(String, (inout Slide) -> Void)] = [
+            ("pen", { $0.elements.append(.stroke(points: (0..<30).map { StrokePoint(x: 150 + Double($0) * 8, y: 120 + sin(Double($0) / 3) * 30) },
+                                                 color: .red, width: 6, kind: .pen)) }),
+            ("highlighter", { $0.elements.append(.stroke(points: [StrokePoint(x: 120, y: 140), StrokePoint(x: 380, y: 150)], color: .yellow,
+                                                         width: 24, kind: .highlighter)) }),
+            ("erase", { $0.elements.removeLast() }),
+            ("move", { $0.elements[1].move(dx: 40, dy: 30) }),
+        ]
+        for (name, edit) in edits {
+            var next = slide
+            edit(&next)
+            let before = try XCTUnwrap(ctx.makeImage())
+            XCTAssertTrue(SlideRenderer.update(ctx, from: slide, to: next, courseware: cw), name)
+            let patched = try XCTUnwrap(ctx.makeImage())
+            let full = try XCTUnwrap(SlideRenderer.image(of: next, courseware: cw, pixelWidth: 640))
+            XCTAssertLessThanOrEqual(maxPixelDifference(patched, full), 2, name)
+            XCTAssertGreaterThan(maxPixelDifference(patched, before), 50, "\(name) changed nothing")
+            slide = next
+        }
+        // A new background is left to a full render, and the bitmap is not touched.
+        var white = slide
+        white.background = SlideBackground()
+        let before = try XCTUnwrap(ctx.makeImage())
+        XCTAssertFalse(SlideRenderer.update(ctx, from: slide, to: white, courseware: cw))
+        XCTAssertEqual(maxPixelDifference(try XCTUnwrap(ctx.makeImage()), before), 0)
+    }
+
+    /// Live ink is drawn on the GPU from `InkTessellator`'s pieces, and the finished stroke
+    /// by Core Graphics. Covering pixels the way the shader does, the pieces have to give the
+    /// same line, or the ink would visibly shift or change weight when the pen lifts.
+    func testInkSegmentsDrawTheSameLineAsCoreGraphics() {
+        let scale = 2.0, w = 480, h = 320
+        /// How much of each pixel Core Graphics covers, rows from the top of the page.
+        func coreGraphics(_ stroke: Stroke) -> [Double] {
+            var data = [UInt8](repeating: 0, count: w * h * 4)
+            let ctx = CGContext(data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.translateBy(x: 0, y: CGFloat(h))
+            ctx.scaleBy(x: scale, y: -scale)
+            SlideRenderer.drawStroke(stroke, origin: .zero, in: ctx)
+            // The highlighter is drawn at 40 % opacity.
+            let alpha = stroke.kind == .highlighter ? 0.4 : 1
+            return (0..<(w * h)).map { min(1, Double(data[$0 * 4 + 3]) / 255 / alpha) }
+        }
+        /// The fragment shader's coverage: a one-pixel box filter across each piece, which
+        /// has round ends unless marked square, and the larger value where pieces overlap.
+        func shader(_ pieces: [InkSegment]) -> [Double] {
+            func band(_ t: Double, _ r: Double) -> Double { max(0, min(1, min(t + 0.5, r) - max(t - 0.5, -r))) }
+            var cover = [Double](repeating: 0, count: w * h)
+            for s in pieces {
+                let ax = s.a.x * scale, ay = s.a.y * scale, bx = s.b.x * scale, by = s.b.y * scale, r = s.width / 2 * scale
+                let len = hypot(bx - ax, by - ay)
+                let (dx, dy) = len > 1e-3 ? ((bx - ax) / len, (by - ay) / len) : (1.0, 0.0)
+                // Square ends reach out to their corners, r·√2 from the end point.
+                let m = r * 1.5 + 2
+                let cols = max(0, Int(min(ax, bx) - m))...min(w - 1, Int(max(ax, bx) + m))
+                let rows = max(0, Int(min(ay, by) - m))...min(h - 1, Int(max(ay, by) + m))
+                for row in rows {
+                    for col in cols {
+                        let px = Double(col) + 0.5 - ax, py = Double(row) + 0.5 - ay
+                        let along = px * dx + py * dy, across = abs(-px * dy + py * dx)
+                        let c: Double
+                        if along < 0 {
+                            c = s.squareStart ? band(across, r) * max(0, min(1, r + 0.5 + along)) : band(hypot(px, py), r)
+                        } else if along > len {
+                            c = s.squareEnd ? band(across, r) * max(0, min(1, r + 0.5 - (along - len)))
+                                            : band(hypot(Double(col) + 0.5 - bx, Double(row) + 0.5 - by), r)
+                        } else {
+                            c = band(across, r)
+                        }
+                        cover[row * w + col] = max(cover[row * w + col], c)
+                    }
+                }
+            }
+            return cover
+        }
+        let pts = (0..<24).map { (i: Int) -> StrokePoint in
+            let t = Double(i)
+            let x: Double = 30 + t * 8 + sin(t) * 6
+            let y: Double = 80 + cos(t * 0.7) * 45
+            return StrokePoint(x: x, y: y, pressure: 0.3 + 0.7 * abs(sin(t * 0.9)))
+        }
+        for kind in PenKind.allCases {
+            let width = kind == .highlighter ? 20.0 : 8.0
+            // Fewer points too: a dot, a straight line and the first curve take their own paths.
+            for n in [1, 2, 3, 5, pts.count] {
+                let stroke = Stroke(points: Array(pts[0..<n]), color: .black, width: width, kind: kind)
+                // A tenth of a pixel, as the live view asks for.
+                let pieces = InkTessellator.segments(of: stroke, tolerance: 0.1 / scale)
+                let a = coreGraphics(stroke), b = shader(pieces)
+                var worst = 0.0, total = 0.0, inked = 0
+                for i in a.indices where a[i] > 0 || b[i] > 0 {
+                    worst = max(worst, abs(a[i] - b[i]))
+                    total += abs(a[i] - b[i])
+                    inked += 1
+                }
+                // Edge pixels are antialiased a little differently; nothing more.
+                XCTAssertLessThan(worst, 0.3, "\(kind), \(n) points")
+                XCTAssertLessThan(total / Double(max(1, inked)), 0.02, "\(kind), \(n) points")
+            }
+        }
+    }
+
     func maxPixelDifference(_ a: CGImage, _ b: CGImage) -> Int {
         func bytes(_ img: CGImage) -> [UInt8] {
             var data = [UInt8](repeating: 0, count: img.width * img.height * 4)
