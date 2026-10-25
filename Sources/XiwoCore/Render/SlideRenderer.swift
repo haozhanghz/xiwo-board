@@ -422,19 +422,31 @@ public enum SlideRenderer {
 
     /// Renders a slide to a bitmap of `pixelSize` (thumbnails, export, recording previews).
     public static func image(of slide: Slide, courseware: Courseware, pixelWidth: Int, options: RenderOptions = RenderOptions()) -> CGImage? {
+        bitmap(of: slide, courseware: courseware, pixelWidth: pixelWidth, options: options)?.makeImage()
+    }
+
+    /// Renders a slide into a new bitmap context and hands back the context, with its
+    /// transform back at the identity, so `update(_:from:to:courseware:options:)` can
+    /// later redraw parts of it in place.
+    public static func bitmap(of slide: Slide, courseware: Courseware, pixelWidth: Int, options: RenderOptions = RenderOptions()) -> CGContext? {
         let size = courseware.slideSize
         guard pixelWidth > 0, size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
         let scale = CGFloat(pixelWidth) / size.width
         let height = (size.height * scale).rounded()
         guard height.isFinite, height < CGFloat(Int.max) else { return nil }
-        let w = pixelWidth, h = max(1, Int(height))
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) else { return nil }
+        let h = max(1, Int(height))
+        guard let ctx = bitmapContext(width: pixelWidth, height: h) else { return nil }
+        ctx.saveGState()
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
         draw(slide, courseware: courseware, in: ctx, options: options)
-        return ctx.makeImage()
+        ctx.restoreGState()
+        return ctx
+    }
+
+    static func bitmapContext(width: Int, height: Int) -> CGContext? {
+        CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)
     }
 
     /// Writes every slide as one PDF page.

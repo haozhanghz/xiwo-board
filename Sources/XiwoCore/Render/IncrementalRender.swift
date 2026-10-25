@@ -67,28 +67,58 @@ extension SlideRenderer {
     /// would cost about the same.
     public static func image(updating image: CGImage, from old: Slide, to new: Slide, courseware: Courseware,
                              options: RenderOptions = RenderOptions()) -> CGImage? {
+        guard let region = patchRegion(from: old, to: new, courseware: courseware) else { return nil }
+        guard !region.isNull else { return image }
+        let w = image.width, h = image.height
+        guard fits(width: w, height: h, courseware), let ctx = bitmapContext(width: w, height: h) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        redraw(region, of: new, in: ctx, courseware: courseware, options: options)
+        return ctx.makeImage()
+    }
+
+    /// Brings `ctx`, a bitmap made by `bitmap(of:)` that holds a render of `old`, up to
+    /// `new` in place, redrawing only what changed. Nothing is copied, so a stroke on a
+    /// full-screen page costs only its own pixels. Returns false when a full render is
+    /// needed or would cost about the same; `ctx` is then unchanged.
+    public static func update(_ ctx: CGContext, from old: Slide, to new: Slide, courseware: Courseware,
+                              options: RenderOptions = RenderOptions()) -> Bool {
+        guard fits(width: ctx.width, height: ctx.height, courseware),
+              let region = patchRegion(from: old, to: new, courseware: courseware) else { return false }
+        if !region.isNull { redraw(region, of: new, in: ctx, courseware: courseware, options: options) }
+        return true
+    }
+
+    /// The part of the page to redraw: `.null` for nothing, nil when a full render is due.
+    private static func patchRegion(from old: Slide, to new: Slide, courseware: Courseware) -> CGRect? {
         guard let region = changedRegion(from: old, to: new) else { return nil }
         let page = CGRect(origin: .zero, size: courseware.slideSize)
         let r = region.intersection(page)
-        guard !r.isNull, r.width > 0, r.height > 0 else { return image }
-        guard r.width * r.height < page.width * page.height / 2 else { return nil }
-        let w = image.width, h = image.height
-        let scale = CGFloat(w) / page.width
-        guard h == max(1, Int((page.height * scale).rounded())),
-              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue) else { return nil }
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard !r.isNull, r.width > 0, r.height > 0 else { return .null }
+        return r.width * r.height < page.width * page.height / 2 ? r : nil
+    }
+
+    /// A bitmap this size is what `image(of:)` gives for the page at this width.
+    private static func fits(width: Int, height: Int, _ courseware: Courseware) -> Bool {
+        let page = courseware.slideSize
+        return page.width > 0 && height == max(1, Int((page.height * CGFloat(width) / page.width).rounded()))
+    }
+
+    /// Clears `r` (slide coordinates) in `ctx`, whose transform is the identity, and draws
+    /// `slide` there again.
+    private static func redraw(_ r: CGRect, of slide: Slide, in ctx: CGContext, courseware: Courseware, options: RenderOptions) {
+        let h = ctx.height
+        let scale = CGFloat(ctx.width) / courseware.slideSize.width
         // Whole device pixels, so the clip has no soft edge for old and new pixels to blend across.
         let minX = floor(r.minX * scale), maxX = ceil(r.maxX * scale)
         let minY = floor(CGFloat(h) - r.maxY * scale), maxY = ceil(CGFloat(h) - r.minY * scale)
         let px = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
         ctx.clip(to: px)
         ctx.clear(px)
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
         let area = CGRect(x: minX / scale, y: (CGFloat(h) - maxY) / scale, width: px.width / scale, height: px.height / scale)
-        draw(new, courseware: courseware, in: ctx, options: options, only: area)
-        return ctx.makeImage()
+        draw(slide, courseware: courseware, in: ctx, options: options, only: area)
     }
 }
