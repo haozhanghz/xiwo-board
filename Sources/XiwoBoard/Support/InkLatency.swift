@@ -43,8 +43,9 @@ final class InkLatency {
             configs = configs.filter { "\($0.kind.rawValue) \($0.name)".contains(only) }
         }
         let screen = NSScreen.main ?? NSScreen.screens[0]
-        print(String(format: "screen %d×%d @%.0fx, pen events at %.0f Hz, present mode on a busy page",
-                     Int(screen.frame.width), Int(screen.frame.height), screen.backingScaleFactor, rate))
+        print(String(format: "screen %d×%d @%.0fx, pen events at %.0f Hz, present mode on a busy page, hard pen %@ nib",
+                     Int(screen.frame.width), Int(screen.frame.height), screen.backingScaleFactor, rate,
+                     ToolState.savedPenNib ? "with" : "without"))
         run(configs[...])
     }
 
