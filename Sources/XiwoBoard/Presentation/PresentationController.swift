@@ -44,6 +44,7 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     private var cancellables: Set<AnyCancellable> = []
     private var savedTool: Tool
     private var autoPlayTask: Task<Void, Never>?
+    private var hotKeys: RecordingHotKeys?
 
     init(document: DocumentModel, tools: ToolState, recorder: LectureRecorder) {
         self.document = document
@@ -103,6 +104,11 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
             return e
         }
         autoPlayMedia()
+        hotKeys = RecordingHotKeys([
+            .record: { [weak self] in self?.startRecording() },
+            .pause: { [weak self] in self?.togglePause() },
+            .stop: { [weak self] in self?.stopRecording() },
+        ])
     }
 
     private func makePanel<V: View>(_ view: V) -> NSPanel {
@@ -333,8 +339,21 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         }
     }
 
+    /// Starts recording with the options last set in 录屏讲课; does nothing while already recording.
+    func startRecording() {
+        guard recorder.state == .idle else { return }
+        closeFlyout()
+        toggleRecording()
+    }
+
+    /// Ends the recording and saves the video; the lecture goes on.
+    func stopRecording() {
+        guard recorder.isRecording else { return }
+        toggleRecording()
+    }
+
     func togglePause() {
-        guard !isEnding else { return }
+        guard !isEnding, recorder.isRecording else { return }
         Task { [weak self] in
             guard let self, !self.isEnding else { return }
             if self.recorder.isPaused {
@@ -358,6 +377,8 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
     }
 
     private func finishEnd() {
+        hotKeys?.invalidate()
+        hotKeys = nil
         MediaPlayerOverlay.stop()
         let changed = document.courseware.slides != startSnapshot.slides
         chromeWindows.forEach { $0.orderOut(nil) }
@@ -476,7 +497,7 @@ struct PresentationToolbar: View {
                 RibbonButton(title: recorder.isPaused ? "继续" : "暂停",
                              systemImage: recorder.isPaused ? "play.circle" : "pause.circle",
                              active: recorder.isPaused) { presenter.togglePause() }
-                    .help(recorder.isPaused ? "继续录制" : "暂停录制，暂停的时间不会录进视频")
+                    .help(recorder.isPaused ? "继续录制（⌥⌘P）" : "暂停录制，暂停的时间不会录进视频（⌥⌘P）")
             }
             RibbonButton(title: "隐藏工具", systemImage: "eye.slash") { presenter.chromeVisible = false }
                 .help("隐藏全部工具，只显示课件（H 键或右下角按钮恢复）")
@@ -537,7 +558,7 @@ struct PresentationToolbar: View {
             }
         }
         .foregroundStyle(recorder.isRecording ? Color(red: 1, green: 0.45, blue: 0.42) : .primary)
-        .help(recorder.isRecording ? "停止录制" : "录屏讲课")
+        .help(recorder.isRecording ? "结束录制并保存（⌥⌘S）" : "录屏讲课（⌥⌘R 直接开始）")
     }
 }
 
@@ -568,8 +589,9 @@ struct RecordingOptions: View {
             }
             .font(.system(size: 14))
             .toggleStyle(SettingToggleStyle())
-            Text("视频保存到「影片 › 录课」")
+            Text("视频保存到「影片 › 录课」\n⌥⌘R 开始　⌥⌘P 暂停 / 继续　⌥⌘S 结束")
                 .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                .lineSpacing(3)
             Button {
                 presenter.closeFlyout()
                 presenter.toggleRecording()
@@ -610,7 +632,7 @@ struct ChromeHandle: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(recorder.isPaused ? "继续录制" : "暂停录制")
+                .help(recorder.isPaused ? "继续录制（⌥⌘P）" : "暂停录制（⌥⌘P）")
                 .accessibilityLabel(recorder.isPaused ? "继续录制" : "暂停录制")
             }
             Button { presenter.chromeVisible = true } label: {

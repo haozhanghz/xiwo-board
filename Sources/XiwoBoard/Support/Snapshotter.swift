@@ -61,6 +61,11 @@ enum Snapshotter {
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools).environment(\.colorScheme, .dark),
                size: CGSize(width: 1440, height: 900), to: dir.appendingPathComponent("editor-dark.png"))
         NSApp.appearance = appearance
+        // In a window like the app's own, so the window buttons show beside the toolbar.
+        renderWindow(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
+                     to: dir.appendingPathComponent("editor-window.png"))
+        renderWindow(HomeView().environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1280, height: 800),
+                     to: dir.appendingPathComponent("home-window.png"))
         // The narrowest window the app allows, and a smaller one that needs icon-only tools.
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1000, height: 640),
                to: dir.appendingPathComponent("editor-1000.png"))
@@ -120,6 +125,22 @@ enum Snapshotter {
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
         host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: url)
+    }
+
+    /// Renders a view in a titled window with a hidden title bar, as the main window is, title bar included.
+    static func renderWindow<V: View>(_ view: V, size: CGSize, to url: URL) {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.contentView = NSHostingView(rootView: view.mainWindowChrome())
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        guard let frame = window.contentView?.superview else { return }
+        frame.layoutSubtreeIfNeeded()
+        guard let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { return }
+        frame.cacheDisplay(in: frame.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
     }
 
