@@ -72,13 +72,10 @@ struct HomeView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: "pencil.and.scribble")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(LinearGradient(colors: [Color(red: 0.13, green: 0.62, blue: 0.42), Color(red: 0.1, green: 0.45, blue: 0.75)],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                                in: RoundedRectangle(cornerRadius: 10))
+                // The app icon itself, so the home page always matches the Dock.
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 52, height: 52)
                 VStack(alignment: .leading) {
                     Text("讲课板").font(.headline)
                     Text("课堂白板").font(.caption).foregroundStyle(.secondary)
