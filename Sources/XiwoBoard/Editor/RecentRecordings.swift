@@ -47,7 +47,7 @@ struct RecentRecordingsSection: View {
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 16)], alignment: .leading, spacing: 20) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 16)], alignment: .leading, spacing: 20) {
                     ForEach(recordings) { RecordingCard(file: $0, onChange: reload) }
                 }
             }

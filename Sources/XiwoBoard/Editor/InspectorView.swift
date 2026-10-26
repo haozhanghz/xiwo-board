@@ -167,13 +167,13 @@ struct ElementInspector: View {
         }
         styleSection
         InspectorSection(title: "排列") {
-            HStack(spacing: 2) {
+            IconGroup {
                 iconButton("square.3.layers.3d.top.filled", "置于顶层") { doc.arrange(.front) }
                 iconButton("square.2.layers.3d.top.filled", "上移一层") { doc.arrange(.forward) }
                 iconButton("square.2.layers.3d.bottom.filled", "下移一层") { doc.arrange(.backward) }
                 iconButton("square.3.layers.3d.bottom.filled", "置于底层") { doc.arrange(.back) }
             }
-            HStack(spacing: 2) {
+            IconGroup {
                 iconButton("align.horizontal.left", "左对齐") { doc.align(.left) }
                 iconButton("align.horizontal.center", "水平居中") { doc.align(.hCenter) }
                 iconButton("align.horizontal.right", "右对齐") { doc.align(.right) }
@@ -181,11 +181,13 @@ struct ElementInspector: View {
                 iconButton("align.vertical.center", "垂直居中") { doc.align(.vCenter) }
                 iconButton("align.vertical.bottom", "底端对齐") { doc.align(.bottom) }
             }
-            HStack {
+            HStack(spacing: 6) {
                 Button("组合") { doc.groupSelection() }.disabled(elements.count < 2)
                 Button("取消组合") { doc.ungroupSelection() }
                     .disabled(!elements.contains { if case .group = $0.content { return true } else { return false } })
             }
+            .buttonStyle(SecondaryButtonStyle(height: 26))
+            .font(.system(size: 12))
         }
         InspectorSection(title: "授课") {
             Toggle("锁定", isOn: flag(\.locked))
@@ -213,7 +215,7 @@ struct ElementInspector: View {
     private func iconButton(_ icon: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Theme.secondaryText)
-                .frame(width: 30, height: 26).contentShape(Rectangle())
+                .frame(width: 32, height: 26).contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle(cornerRadius: 6)).help(help).accessibilityLabel(help)
     }
@@ -329,7 +331,7 @@ struct NumberField: View {
             })
                 .textFieldStyle(.plain)
                 .font(.system(size: 12).monospacedDigit())
-                .padding(.horizontal, 7).frame(width: 72, height: 24)
+                .padding(.horizontal, 8).frame(width: 74, height: 26)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
                 .accessibilityLabel(label)

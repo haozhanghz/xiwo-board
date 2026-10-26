@@ -269,10 +269,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     }
 
     private func drawSelectionChrome(_ ctx: CGContext) {
-        let accent = NSColor.controlAccentColor.cgColor
+        let accent = Theme.nsAccent.cgColor
         if case .marquee(let a, let b) = drag {
             let rect = toView(CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y)))
-            ctx.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor)
+            ctx.setFillColor(Theme.nsAccent.withAlphaComponent(0.12).cgColor)
             ctx.fill(rect)
             ctx.setStrokeColor(accent); ctx.setLineWidth(1); ctx.stroke(rect)
         }
@@ -909,7 +909,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         tv.textContainerInset = NSSize(width: 2, height: 2)
         tv.isVerticallyResizable = true
         tv.wantsLayer = true
-        tv.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        tv.layer?.borderColor = Theme.nsAccent.cgColor
         tv.layer?.borderWidth = 1.5
         addSubview(tv)
         window?.makeFirstResponder(tv)

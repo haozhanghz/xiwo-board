@@ -68,7 +68,9 @@ struct RibbonPopoverButton<Content: View>: View {
         RibbonButton(title: title, systemImage: systemImage, active: active) {
             if let onTap, !active { onTap() } else { shown.toggle() }
         }
-        .popover(isPresented: $shown, arrowEdge: .bottom) { content().padding(12) }
+        .popover(isPresented: $shown, arrowEdge: .bottom) {
+            content().padding(14).tint(Theme.accent).toggleStyle(SettingToggleStyle())
+        }
     }
 }
 
@@ -96,7 +98,8 @@ struct EditorToolbar: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.text)
-                .frame(width: min(220, max(60, CGFloat((doc.pendingTitle ?? doc.title).count) * 13.5 + 8)))
+                .frame(width: min(160, max(60, CGFloat((doc.pendingTitle ?? doc.title).count) * 13.5 + 4)))
+                .lineLimit(1)
                 .focused($titleFocused)
                 .onSubmit { doc.finishEditing() }
                 .onChange(of: titleFocused) { _, focused in if !focused { doc.finishEditing() } }
@@ -245,13 +248,8 @@ struct PenSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("笔型", selection: $tools.penKind) {
-                Text("硬笔").tag(PenKind.pen)
-                Text("毛笔").tag(PenKind.brush)
-                Text("荧光笔").tag(PenKind.highlighter)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            PillPicker(selection: $tools.penKind, options: [(.pen, "硬笔"), (.brush, "毛笔"), (.highlighter, "荧光笔")])
+                .accessibilityLabel("笔型")
             // Stays in place for the other pens, so the popover keeps its size.
             Toggle("笔锋", isOn: $tools.penNib)
                 .toggleStyle(SettingToggleStyle())
@@ -339,17 +337,16 @@ struct EraserSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("", selection: $tools.eraserMode) {
-                ForEach(EraserMode.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            HStack {
-                Text("大小")
-                Slider(value: $tools.eraserSize, in: 10...160)
+            PillPicker(selection: $tools.eraserMode, options: EraserMode.allCases.map { ($0, $0.label) })
+            HStack(spacing: 10) {
+                Text("大小").font(.system(size: 12)).foregroundStyle(.secondary)
+                Slider(value: $tools.eraserSize, in: 10...160).controlSize(.small)
             }
             Button(role: .destructive) { doc.clearInk() } label: {
-                Label("清除本页笔迹", systemImage: "trash")
+                Label("清除本页笔迹", systemImage: "trash").font(.system(size: 12))
+                    .foregroundStyle(Color(red: 0.86, green: 0.3, blue: 0.26))
             }
+            .buttonStyle(.plain)
         }
         .frame(width: 220)
     }
@@ -364,9 +361,9 @@ struct ShapePicker: View {
             ForEach(ShapeType.palette, id: \.self) { t in
                 Button { pick(t); dismiss() } label: {
                     ShapeIcon(type: t).frame(width: 40, height: 34)
-                        .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(QuietButtonStyle(cornerRadius: 7))
                 .help(t.displayName)
                 .accessibilityLabel(t.displayName)
             }
@@ -382,7 +379,7 @@ struct ShapeIcon: View {
             let rect = CGRect(x: 6, y: 6, width: size.width - 12, height: size.height - 12)
             let spec = ShapeSpec(type: type)
             let path = Path(ShapePath.path(for: spec, in: rect))
-            if !type.isOpen { ctx.fill(path, with: .color(.accentColor.opacity(0.18)), style: FillStyle(eoFill: true)) }
+            if !type.isOpen { ctx.fill(path, with: .color(Theme.accent.opacity(0.18)), style: FillStyle(eoFill: true)) }
             ctx.stroke(path, with: .color(.primary), style: StrokeStyle(lineWidth: 1.4, dash: type == .dottedLine ? [3, 2] : []))
             if let heads = ShapePath.arrowHeads(for: ShapeSpec(type: type, style: ShapeAppearance(lineWidth: 1)), in: rect) {
                 ctx.fill(Path(heads), with: .color(.primary))
@@ -406,7 +403,7 @@ struct TablePicker: View {
                             // Buttons, so each size can be picked by name with VoiceOver or the keyboard.
                             Button { pick(r, c); dismiss() } label: {
                                 Rectangle()
-                                    .fill(r <= hover.0 && c <= hover.1 ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.15))
+                                    .fill(r <= hover.0 && c <= hover.1 ? Theme.accent.opacity(0.55) : Theme.hover)
                                     .frame(width: 18, height: 18)
                             }
                             .buttonStyle(.plain)

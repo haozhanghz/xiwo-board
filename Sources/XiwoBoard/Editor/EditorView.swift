@@ -75,8 +75,8 @@ struct StatusBar: View {
             if !doc.selection.isEmpty { Text("已选择 \(doc.selection.count) 个对象") }
             Spacer()
             HStack(spacing: 5) {
-                Circle().fill(doc.isDirty ? Theme.accent : Theme.tertiaryText).frame(width: 6, height: 6)
-                Text(doc.isDirty ? "未保存" : (doc.fileURL == nil ? "新课件" : "已保存"))
+                if doc.isDirty { Circle().fill(Theme.accent).frame(width: 6, height: 6) }
+                Text(doc.isDirty ? "有未保存的修改" : (doc.fileURL == nil ? "尚未保存" : "已保存"))
             }
             Text("\(Int(doc.courseware.slideSize.width)) × \(Int(doc.courseware.slideSize.height))")
         }
@@ -156,7 +156,7 @@ struct SlideThumbnailRow: View, Equatable {
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             Text("\(index + 1)")
-                .font(.system(size: 11, weight: selected ? .semibold : .regular).monospacedDigit())
+                .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(selected ? Theme.text : Theme.tertiaryText)
                 .frame(width: 16, alignment: .trailing)
                 .padding(.top, 2)

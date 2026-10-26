@@ -565,16 +565,16 @@ struct RecordingOptions: View {
             }
             .font(.system(size: 13))
             .toggleStyle(SettingToggleStyle())
-            Text("保存到「影片 › 讲课板录课」。再点一次「录制」停止。")
+            Text("视频保存到「影片 › 讲课板录课」")
                 .font(.system(size: 11.5)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             Button {
                 presenter.closeFlyout()
                 presenter.toggleRecording()
             } label: {
                 Label("开始录制", systemImage: "record.circle").frame(maxWidth: .infinity)
             }
-            .buttonStyle(PrimaryButtonStyle(tint: Color(red: 0.86, green: 0.27, blue: 0.24)))
+            .buttonStyle(PrimaryButtonStyle())
+            .help("录制中再点一次工具栏上的「录制」按钮即可停止")
             .disabled(recorder.state != .idle)
             if let last = recorder.lastRecording {
                 Button("打开上次录制") { NSWorkspace.shared.open(last) }
@@ -611,10 +611,12 @@ struct ChromeHandle: View {
                 .accessibilityLabel(recorder.isPaused ? "继续录制" : "暂停录制")
             }
             Button { presenter.chromeVisible = true } label: {
-                Image(systemName: "wrench.and.screwdriver").font(.system(size: 15))
+                Image(systemName: "chevron.up").font(.system(size: 13, weight: .semibold))
+                    .frame(width: 22, height: 22).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("显示工具栏（H）")
+            .accessibilityLabel("显示工具栏")
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(Color(red: 0x26 / 255, green: 0x26 / 255, blue: 0x24 / 255).opacity(0.9), in: Capsule())

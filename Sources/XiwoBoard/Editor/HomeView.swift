@@ -12,7 +12,7 @@ struct HomeView: View {
             sidebar
             Rectangle().fill(Theme.line).frame(width: 1)
             ScrollView {
-                VStack(alignment: .leading, spacing: 40) {
+                VStack(alignment: .leading, spacing: 36) {
                     Text("今天讲什么课？")
                         .font(.system(size: 30, weight: .regular, design: .serif))
                         .foregroundStyle(Theme.text)
@@ -20,8 +20,8 @@ struct HomeView: View {
                     recentSection
                     RecentRecordingsSection()
                 }
-                .frame(maxWidth: 920, alignment: .leading)
-                .padding(.horizontal, 48).padding(.vertical, 56)
+                .frame(maxWidth: 860, alignment: .leading)
+                .padding(.horizontal, 48).padding(.top, 48).padding(.bottom, 40)
                 .frame(maxWidth: .infinity)
             }
             .background(Theme.background)
@@ -36,28 +36,19 @@ struct HomeView: View {
                 if !recent.isEmpty { Button("打开其他课件…") { app.openWithPanel() } }
             }
             if recent.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "rectangle.on.rectangle")
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(Theme.tertiaryText)
-                    VStack(spacing: 4) {
-                        Text("还没有课件").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text)
-                        Text("新建一个，或打开 .xwb / .enbx 文件").font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
-                    }
-                    HStack(spacing: 8) {
-                        Button { app.newDocument() } label: { Label("新建课件", systemImage: "plus") }
-                            .buttonStyle(PrimaryButtonStyle())
-                        Button { app.openWithPanel() } label: { Text("打开课件…") }
-                            .buttonStyle(SecondaryButtonStyle())
-                    }
+                VStack(spacing: 12) {
+                    Text("打开过的课件会出现在这里，也可以打开 .enbx 课件")
+                        .font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
+                    Button { app.openWithPanel() } label: { Text("打开课件…") }
+                        .buttonStyle(SecondaryButtonStyle())
                 }
-                .frame(maxWidth: .infinity).padding(.vertical, 36)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+                .frame(maxWidth: .infinity, minHeight: 110)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(recent.prefix(8).enumerated()), id: \.element) { i, url in
-                        if i > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 50) }
+                        if i > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 54).padding(.trailing, 8) }
                         RecentFileRow(url: url, modified: modified(url)) { app.open(url) }
                             .contextMenu {
                                 Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -156,21 +147,23 @@ private struct RecentFileRow: View {
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 30, height: 30)
                     .background(Theme.hover, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(url.deletingPathExtension().lastPathComponent)
                         .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text)
                         .lineLimit(1)
-                    Text(url.deletingLastPathComponent().path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                        .font(.system(size: 11.5)).foregroundStyle(Theme.tertiaryText)
-                        .lineLimit(1).truncationMode(.middle)
+                    Text([url.deletingLastPathComponent().lastPathComponent, modified].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 16)
-                Text(modified).font(.system(size: 11.5)).foregroundStyle(Theme.tertiaryText)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.tertiaryText)
             }
-            .padding(.horizontal, 8).padding(.vertical, 7)
+            .padding(.horizontal, 10).padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle())
+        .help(url.path)
     }
 }
 

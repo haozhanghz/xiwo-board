@@ -25,7 +25,7 @@ enum Theme {
     /// The one accent: primary buttons, selection, focus.
     static let accent = Color(nsAccent)
     static let nsAccent = NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0xE08A6D) : hex(0xC96442)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0xD97757) : hex(0xC96442)
     }
 
     static func nsDynamic(light: UInt32, dark: UInt32, alpha: CGFloat = 1) -> NSColor {
@@ -101,14 +101,68 @@ struct PrimaryButtonStyle: ButtonStyle {
 
 /// An outlined button on the background, for secondary actions.
 struct SecondaryButtonStyle: ButtonStyle {
+    var height: CGFloat = 30
+
     func makeBody(configuration: Configuration) -> some View {
+        SecondaryButtonBody(configuration: configuration, height: height)
+    }
+}
+
+private struct SecondaryButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let height: CGFloat
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
         configuration.label
-            .font(.system(size: 13))
+            .font(.system(size: height < 30 ? 12 : 13))
             .foregroundStyle(Theme.text)
-            .padding(.horizontal, 12).frame(height: 30)
+            .opacity(enabled ? 1 : 0.4)
+            .padding(.horizontal, height < 30 ? 10 : 12).frame(height: height)
             .background(configuration.isPressed ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
             .contentShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// Segmented choice drawn as a soft track with a raised pill, used instead of the system control.
+struct PillPicker<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(Value, String)]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.0) { value, title in
+                Button { selection = value } label: {
+                    Text(title)
+                        .font(.system(size: 12, weight: selection == value ? .semibold : .regular))
+                        .foregroundStyle(selection == value ? Theme.text : Theme.secondaryText)
+                        .frame(maxWidth: .infinity, minHeight: 26)
+                        .background {
+                            if selection == value {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.surface)
+                                    .shadow(color: .black.opacity(0.08), radius: 1.5, y: 0.5)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == value ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Theme.hover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// Icon buttons sharing one soft track, for arrange and align rows.
+struct IconGroup<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 0) { content() }
+            .padding(2)
+            .background(Theme.hover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

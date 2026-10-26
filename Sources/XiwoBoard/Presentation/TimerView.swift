@@ -19,11 +19,7 @@ struct TimerView: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack {
-                Picker("", selection: $mode) {
-                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                PillPicker(selection: $mode, options: Mode.allCases.map { ($0, $0.rawValue) })
                 .frame(width: 150)
                 .onChange(of: mode) { _, _ in reset() }
                 Spacer()
@@ -34,10 +30,17 @@ struct TimerView: View {
                 .buttonStyle(QuietButtonStyle())
                 .accessibilityLabel("关闭计时器")
             }
-            Text(format(mode == .countdown ? remaining : elapsed))
-                .font(.system(size: 64, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(mode == .countdown && remaining <= 10 && running ? Color(red: 1, green: 0.45, blue: 0.42) : .primary)
-                .frame(minWidth: 260)
+            HStack(spacing: 14) {
+                // Hidden rather than removed, so the panel keeps its size while the timer runs.
+                Button { adjust(-60) } label: { stepIcon("minus") }.buttonStyle(.plain).help("减 1 分钟")
+                    .opacity(mode == .countdown && !running ? 1 : 0).disabled(mode != .countdown || running)
+                Text(format(mode == .countdown ? remaining : elapsed))
+                    .font(.system(size: 64, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(mode == .countdown && remaining <= 10 && running ? Color(red: 1, green: 0.45, blue: 0.42) : .primary)
+                Button { adjust(60) } label: { stepIcon("plus") }.buttonStyle(.plain).help("加 1 分钟")
+                    .opacity(mode == .countdown && !running ? 1 : 0).disabled(mode != .countdown || running)
+            }
+            .frame(minWidth: 300)
             if mode == .countdown && !running {
                 HStack {
                     ForEach([30.0, 60, 180, 300, 600], id: \.self) { s in
@@ -51,10 +54,6 @@ struct TimerView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                }
-                HStack {
-                    Button { adjust(-60) } label: { stepIcon("minus") }.buttonStyle(QuietButtonStyle()).help("减 1 分钟")
-                    Button { adjust(60) } label: { stepIcon("plus") }.buttonStyle(QuietButtonStyle()).help("加 1 分钟")
                 }
             }
             HStack(spacing: 12) {
@@ -93,7 +92,10 @@ struct TimerView: View {
     }
 
     private func stepIcon(_ name: String) -> some View {
-        Image(systemName: name).font(.system(size: 12, weight: .medium)).frame(width: 28, height: 24).contentShape(Rectangle())
+        Image(systemName: name).font(.system(size: 13, weight: .semibold))
+            .frame(width: 32, height: 32)
+            .background(Color.white.opacity(0.08), in: Circle())
+            .contentShape(Circle())
     }
 
     private func adjust(_ d: TimeInterval) {
