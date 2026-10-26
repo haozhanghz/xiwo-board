@@ -253,6 +253,18 @@ final class XiwoCoreTests: XCTestCase {
                 XCTAssertLessThanOrEqual(changeOutside(tail, before, after), nib ? 2 : 1, "\(kind)\(nib ? " with nib" : "") point \(n)")
                 before = after
             }
+            // Steadied as it is written, every point that can still move may change: where
+            // they were and where they are now.
+            var steady = StrokeSmoother(sigma: 6)
+            before = render([], width: width, kind: kind)
+            for (n, p) in stroke.enumerated() {
+                let was = SlideRenderer.liveStrokeTail(steady.points, from: steady.stable, width: width, kind: kind)
+                let from = steady.append(p)
+                let after = render(steady.points, width: width, kind: kind)
+                let tail = was.union(SlideRenderer.liveStrokeTail(steady.points, from: from, width: width, kind: kind))
+                XCTAssertLessThanOrEqual(changeOutside(tail, before, after), nib ? 2 : 1, "\(kind)\(nib ? " with nib" : "") steadied, point \(n)")
+                before = after
+            }
         }
     }
 

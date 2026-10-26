@@ -56,8 +56,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     enum Handle: CaseIterable { case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left }
 
     private var drag: Drag = .none
-    /// Points of the stroke being written. Kept outside `drag` so appending does not copy the array.
-    private var liveStrokePoints: [StrokePoint] = []
+    /// The stroke being written, steadied as it goes. Kept outside `drag` so appending does
+    /// not copy its arrays.
+    private var liveStroke: StrokeSmoother?
+    private var liveStrokePoints: [StrokePoint] { liveStroke?.points ?? [] }
     /// Draws the stroke being written on the GPU; nil without Metal.
     private(set) var liveInk: LiveInkView?
     /// The stroke being written is on `liveInk`, not drawn by `draw(_:)`.
@@ -424,12 +426,13 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         case .pen:
             brushSpeed = 0
             nib = tools.penKind == .pen && tools.penNib ? PenNib(width: tools.penWidth, scale: Double(scale)) : nil
-            let first = strokePoint(at: p, event)
-            liveStrokePoints = [first]
+            // The shakes it takes out are the same size on screen at any zoom.
+            liveStroke = StrokeSmoother(sigma: tools.penSteadiness.sigma / Double(scale))
+            liveStroke!.append(strokePoint(at: p, event))
             drag = .drawing
             inkOnGPU = liveInk?.begin(color: tools.penColor, width: tools.penWidth, kind: tools.penKind,
                                       slideRect: slideRect, scale: scale) ?? false
-            if inkOnGPU { liveInk?.append(first) } else { setNeedsDisplay(liveInkDirtyRect()) }
+            if inkOnGPU { liveInk?.update(liveStroke!) } else { setNeedsDisplay(liveInkDirtyRect(from: 0)) }
             return
         case .eraser:
             drag = .erasing(hasUndo: false, last: p)
@@ -521,11 +524,18 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         pointer = p
         switch drag {
         case .drawing:
-            let last = liveStrokePoints.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
-            if hypot(p.x - last.x, p.y - last.y) >= 0.8 / scale {
+            let last = liveStroke?.raw.last.map { CGPoint(x: $0.x, y: $0.y) } ?? p
+            if liveStroke != nil, hypot(p.x - last.x, p.y - last.y) >= 0.8 / scale {
                 let point = strokePoint(at: p, event)
-                liveStrokePoints.append(point)
-                if inkOnGPU { liveInk?.append(point) } else { setNeedsDisplay(liveInkDirtyRect()) }
+                if inkOnGPU {
+                    liveStroke!.append(point)
+                    liveInk?.update(liveStroke!)
+                } else {
+                    // Where the points that could still move were, and where they are now.
+                    let before = liveInkDirtyRect(from: liveStroke!.stable)
+                    let from = liveStroke!.append(point)
+                    setNeedsDisplay(before.union(liveInkDirtyRect(from: from)))
+                }
             }
             lastDragPoint = p
             lastDragTime = event.timestamp
@@ -581,16 +591,17 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     override func mouseUp(with event: NSEvent) {
         switch drag {
         case .drawing:
-            nib?.taper(&liveStrokePoints, liftedAt: event.timestamp)
+            var points = liveStrokePoints
+            nib?.taper(&points, liftedAt: event.timestamp)
             nib = nil
             // Tight enough that the stored line does not visibly shift from the one drawn live.
-            let simplified = Geometry.simplify(liveStrokePoints, tolerance: min(0.35, 0.2 / scale), width: tools.penWidth)
+            let simplified = Geometry.simplify(points, tolerance: min(0.35, 0.2 / scale), width: tools.penWidth)
             let stroke = BoardElement.stroke(points: simplified, color: tools.penColor, width: tools.penWidth, kind: tools.penKind)
             if !simplified.isEmpty { document.editSlide { $0.elements.append(stroke) } }
             if inkOnGPU {
                 inkOnGPU = false
                 drag = .none
-                liveStrokePoints.removeAll(keepingCapacity: true)
+                liveStroke = nil
                 // The page now has the stroke. Repaint just that patch from it right away, so it
                 // is in this run-loop pass's transaction; the Metal layer clears once that is out.
                 setNeedsDisplay(toView(SlideRenderer.paintBounds(of: stroke)).insetBy(dx: -1, dy: -1))
@@ -612,7 +623,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             break
         }
         drag = .none
-        liveStrokePoints.removeAll(keepingCapacity: true)
+        liveStroke = nil
         needsDisplay = true
     }
 
@@ -724,9 +735,9 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         return max(0.25, min(1, 1.1 - brushSpeed / 2500))
     }
 
-    /// The part of the view the newest live-ink point changed.
-    private func liveInkDirtyRect() -> NSRect {
-        let tail = SlideRenderer.liveStrokeTail(liveStrokePoints, width: tools.penWidth, kind: tools.penKind)
+    /// The part of the view the live-ink points from `start` on reach.
+    private func liveInkDirtyRect(from start: Int) -> NSRect {
+        let tail = SlideRenderer.liveStrokeTail(liveStrokePoints, from: start, width: tools.penWidth, kind: tools.penKind)
         return toView(tail).insetBy(dx: -2, dy: -2)
     }
 
@@ -756,7 +767,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         inkOnGPU = false
         nib = nil
         drag = .none
-        liveStrokePoints.removeAll()
+        liveStroke = nil
         needsDisplay = true
     }
 
