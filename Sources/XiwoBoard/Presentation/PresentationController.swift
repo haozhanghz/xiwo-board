@@ -560,6 +560,9 @@ struct RecordingOptions: View {
                     .help("工具栏、计时器等面板不会录进视频，你自己仍能看到和使用")
                 Toggle("麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
                 Toggle("电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
+                Toggle("去掉写字声", isOn: $recorder.removeNoise)
+                    .disabled(recorder.state != .idle || !recorder.recordMicrophone || recorder.recordSystemAudio)
+                    .help("保存时去掉麦克风里的写字声等杂音（不录电脑声音时）")
                 Toggle("鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
                     .help("不录鼠标指针时，可以用激光笔在视频里指示")
             }

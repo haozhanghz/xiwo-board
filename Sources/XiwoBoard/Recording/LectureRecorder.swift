@@ -34,6 +34,15 @@ final class LectureRecorder: NSObject, ObservableObject {
     /// Off by default so the pointer stays out of the video. The laser pointer is drawn
     /// on the slide itself, so pointing at things still shows up.
     @Published var recordCursor = false
+    /// Takes the pen's tapping and scratching and other noise out of the microphone
+    /// when the recording is saved, leaving the voice.
+    @Published var removeNoise = UserDefaults.standard.object(forKey: LectureRecorder.removeNoiseKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(removeNoise, forKey: Self.removeNoiseKey) }
+    }
+    private static let removeNoiseKey = "recorder.removeNoise"
+    /// The sound tracks that hold only the microphone. With system audio on as well,
+    /// which track is which is not known, so no voice is isolated.
+    private var voiceTracks: Set<Int> { removeNoise && recordMicrophone && !recordSystemAudio ? [0] : [] }
 
     private var stream: SCStream?
     private var output: SCRecordingOutput?
@@ -281,7 +290,7 @@ final class LectureRecorder: NSObject, ObservableObject {
         log.info("Joining \(parts.count) parts")
         let joined = url.deletingPathExtension().appendingPathExtension("joining.mp4")
         do {
-            try await RecordingMerger.merge(parts, into: joined)
+            try await RecordingMerger.merge(parts, into: joined, voiceTracks: voiceTracks)
         } catch {
             try? FileManager.default.removeItem(at: joined)
             throw error
@@ -295,17 +304,17 @@ final class LectureRecorder: NSObject, ObservableObject {
         return url
     }
 
-    /// Raises quiet sound in a finished recording. If that fails the recording is kept
+    /// Isolates the voice in a finished recording and raises quiet sound. If that fails the recording is kept
     /// as it was.
     private func level(_ url: URL) async {
         let levelled = url.deletingPathExtension().appendingPathExtension("levelling.mp4")
         do {
-            if try await RecordingMerger.level(url, into: levelled) {
+            if try await RecordingMerger.level(url, into: levelled, voiceTracks: voiceTracks) {
                 _ = try FileManager.default.replaceItemAt(url, withItemAt: levelled)
-                log.info("Raised the recording's sound")
+                log.info("Cleaned up the recording's sound")
             }
         } catch {
-            log.error("Raising the sound failed, keeping it as recorded: \(String(describing: error), privacy: .public)")
+            log.error("Cleaning up the sound failed, keeping it as recorded: \(String(describing: error), privacy: .public)")
         }
         try? FileManager.default.removeItem(at: levelled)
     }
