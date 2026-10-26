@@ -56,19 +56,20 @@ enum Theme {
 /// Motion in three spring tiers, after Fluid Functionalism: the bigger the thing that moves, the
 /// slower the spring, and every animation says something (where the pointer is, what is chosen).
 /// Exits are plain tweens a tier quicker, so a dismissal reads crisp instead of replaying the entrance.
+/// The tiers run about a third quicker than Fluid Functionalism's, so the highlight keeps up with a fast hand.
 enum Motion {
-    /// Hover highlights, fades, focus: 0.08 s, no bounce.
-    static let fast = Animation.spring(duration: 0.08, bounce: 0)
-    /// Selection pills, switches, menus: 0.16 s, critically damped, so it lands exactly.
-    static let moderate = Animation.spring(duration: 0.16, bounce: 0)
-    /// Large surfaces such as panels: 0.24 s with a little bounce.
-    static let slow = Animation.spring(duration: 0.24, bounce: 0.12)
-    static let fastExit = Animation.easeIn(duration: 0.06)
+    /// Hover highlights, fades, focus: 0.05 s, no bounce.
+    static let fast = Animation.spring(duration: 0.05, bounce: 0)
+    /// Selection pills, switches, menus: 0.11 s, critically damped, so it lands exactly.
+    static let moderate = Animation.spring(duration: 0.11, bounce: 0)
+    /// Large surfaces such as panels: 0.18 s with a little bounce.
+    static let slow = Animation.spring(duration: 0.18, bounce: 0.12)
+    static let fastExit = Animation.easeIn(duration: 0.04)
     /// Colour and weight changes on labels.
-    static let tint = Animation.easeOut(duration: 0.08)
-    /// Buttons press in quickly and let go slowly.
-    static let press = Animation.easeOut(duration: 0.08)
-    static let release = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.18)
+    static let tint = Animation.easeOut(duration: 0.05)
+    /// Buttons press in at once and spring back almost as quickly.
+    static let press = Animation.easeOut(duration: 0.04)
+    static let release = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.1)
 }
 
 extension View {

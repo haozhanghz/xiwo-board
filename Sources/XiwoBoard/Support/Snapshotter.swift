@@ -77,6 +77,14 @@ enum Snapshotter {
                to: dir.appendingPathComponent("editor-1000.png"))
         render(EditorToolbar(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 820, height: 60),
                to: dir.appendingPathComponent("toolbar-820.png"))
+        // The insert tools unfolded, in a wide window and in the narrowest one.
+        let insertWasShown = UserDefaults.standard.bool(forKey: "InsertToolsShown")
+        UserDefaults.standard.set(true, forKey: "InsertToolsShown")
+        renderWindow(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
+                     to: dir.appendingPathComponent("editor-insert.png"))
+        renderWindow(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1000, height: 640),
+                     to: dir.appendingPathComponent("editor-insert-1000.png"))
+        UserDefaults.standard.set(insertWasShown, forKey: "InsertToolsShown")
         // The pointer on 画笔 while 选择 is the chosen tool.
         render(EditorToolbar(doc: doc).environmentObject(app).environmentObject(app.tools).environment(\.fluidHoverPreview, "画笔"),
                size: CGSize(width: 1440, height: 52), to: dir.appendingPathComponent("toolbar-hover.png"))

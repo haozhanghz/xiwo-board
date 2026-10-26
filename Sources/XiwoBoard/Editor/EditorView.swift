@@ -8,10 +8,15 @@ struct EditorView: View {
     @EnvironmentObject var tools: ToolState
     /// The inspector starts collapsed: most lessons are written on the board, not styled here.
     @AppStorage("InspectorShown") private var inspectorShown = false
+    @AppStorage("InsertToolsShown") private var insertToolsShown = false
 
     var body: some View {
         VStack(spacing: 0) {
             EditorToolbar(doc: doc)
+            if insertToolsShown {
+                InsertToolsBar(doc: doc)
+                    .transition(.opacity)
+            }
             Hairline()
             HStack(spacing: 0) {
                 SlideSidebar(doc: doc)
@@ -28,6 +33,7 @@ struct EditorView: View {
             Hairline()
             StatusBar(doc: doc)
         }
+        .animation(Motion.moderate, value: insertToolsShown)
         .tint(Theme.accent)
         .onAppear { tools.tool = .select }
     }
