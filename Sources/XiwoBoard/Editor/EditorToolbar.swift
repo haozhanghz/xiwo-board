@@ -234,29 +234,12 @@ struct EditorToolbar: View {
                 RibbonPopoverButton(title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser, glides: true,
                                     onTap: { tools.tool = .eraser }) { EraserSettings(doc: doc) }
                 divider
-                if insertToolsShown {
-                    Group {
-                        RibbonButton(title: "文本", systemImage: "character.textbox", active: tools.tool == .text, glides: true) { tools.tool = .text }
-                        RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: isShapeTool, glides: true) {
-                            ShapePicker { tools.tool = .shape($0) }
-                        }
-                        RibbonButton(title: "图片", systemImage: "photo") { Exporter.insertImages(into: doc) }
-                        RibbonButton(title: "音视频", systemImage: "film") { Exporter.insertMedia(into: doc) }
-                        RibbonPopoverButton(title: "表格", systemImage: "tablecells") { TablePicker { r, c in doc.insertTable(rows: r, columns: c) } }
-                        RibbonPopoverButton(title: "学科工具", systemImage: "function") { SubjectTools(doc: doc) }
-                        RibbonButton(title: "蒙层", systemImage: "rectangle.dashed.badge.record",
-                                     active: !doc.selectedElements.isEmpty && doc.selectedElements.allSatisfy(\.masked)) {
-                            let all = doc.selectedElements.allSatisfy(\.masked)
-                            doc.updateSelected { $0.masked = !all }
-                        }
-                        .disabled(doc.selection.isEmpty)
-                    }
-                    .transition(.opacity)
-                }
+                // The insert tools open in a row of their own under the toolbar (InsertToolsBar),
+                // so this row keeps its width and nothing is pushed out of a narrow window.
                 RibbonButton(title: insertToolsShown ? "收起" : "插入",
-                             systemImage: insertToolsShown ? "chevron.left" : "plus.square.on.square",
+                             systemImage: insertToolsShown ? "chevron.up" : "plus.square.on.square",
                              label: insertToolsShown ? "收起插入工具" : "插入文本、形状、图片等", hoverID: "insert") {
-                    if insertToolsShown, tools.tool == .text || isShapeTool { tools.tool = .select }
+                    if insertToolsShown, tools.tool == .text || tools.isShapeTool { tools.tool = .select }
                     withAnimation(Motion.moderate) { insertToolsShown.toggle() }
                 }
                 .help(insertToolsShown ? "收起插入工具" : "文本、形状、图片、音视频、表格、学科工具、蒙层")
@@ -267,9 +250,44 @@ struct EditorToolbar: View {
     }
 
     private var divider: some View { Rectangle().fill(Theme.divider).frame(width: 1, height: 22).padding(.horizontal, 6) }
+}
 
-    private var isShapeTool: Bool {
-        if case .shape = tools.tool { return true }
+/// Text, shapes, pictures and the other insert tools, in a row under the toolbar while 插入 is open.
+struct InsertToolsBar: View {
+    @ObservedObject var doc: DocumentModel
+    @EnvironmentObject var tools: ToolState
+
+    var body: some View {
+        RibbonRow {
+            HStack(spacing: 4) {
+                RibbonButton(title: "文本", systemImage: "character.textbox", active: tools.tool == .text, glides: true) { tools.tool = .text }
+                RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: tools.isShapeTool, glides: true) {
+                    ShapePicker { tools.tool = .shape($0) }
+                }
+                RibbonButton(title: "图片", systemImage: "photo") { Exporter.insertImages(into: doc) }
+                RibbonButton(title: "音视频", systemImage: "film") { Exporter.insertMedia(into: doc) }
+                RibbonPopoverButton(title: "表格", systemImage: "tablecells") { TablePicker { r, c in doc.insertTable(rows: r, columns: c) } }
+                RibbonPopoverButton(title: "学科工具", systemImage: "function") { SubjectTools(doc: doc) }
+                RibbonButton(title: "蒙层", systemImage: "rectangle.dashed.badge.record",
+                             active: !doc.selectedElements.isEmpty && doc.selectedElements.allSatisfy(\.masked)) {
+                    let all = doc.selectedElements.allSatisfy(\.masked)
+                    doc.updateSelected { $0.masked = !all }
+                }
+                .disabled(doc.selection.isEmpty)
+            }
+            .fixedSize()
+        }
+        .animation(Motion.moderate, value: tools.tool)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity)
+        // Kept to its own row: a background reaching into the title bar's safe area would paint over the toolbar.
+        .background(Theme.background, ignoresSafeAreaEdges: [])
+    }
+}
+
+extension ToolState {
+    var isShapeTool: Bool {
+        if case .shape = tool { return true }
         return false
     }
 }

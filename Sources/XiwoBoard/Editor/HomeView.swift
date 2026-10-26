@@ -153,7 +153,7 @@ private struct RecentFileRow: View {
                     .frame(width: 30, height: 30)
                     .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(url.deletingPathExtension().lastPathComponent)
+                    Text(url.coursewareName)
                         .font(.system(size: 14)).foregroundStyle(Theme.text)
                         .lineLimit(1)
                     Text([url.deletingLastPathComponent().lastPathComponent, modified].filter { !$0.isEmpty }.joined(separator: " · "))

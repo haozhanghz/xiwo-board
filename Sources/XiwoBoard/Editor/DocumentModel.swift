@@ -79,7 +79,7 @@ final class DocumentModel: ObservableObject {
     /// Puts the whole document back as `snapshot`, as one step that can be undone.
     /// `unsaved` says whether that leaves changes the file on disk does not have.
     func restore(_ snapshot: Courseware, unsaved: Bool) {
-        edit { $0 = snapshot }
+        edit { $0 = snapshot.named($0.title) }
         isDirty = unsaved
     }
 
@@ -101,7 +101,8 @@ final class DocumentModel: ObservableObject {
         finishEditing()
         guard let s = undoStack.popLast() else { return }
         redoStack.append(Snapshot(courseware: courseware, index: currentIndex))
-        courseware = s.courseware
+        // The name belongs to the file, not to the edit history.
+        courseware = s.courseware.named(courseware.title)
         currentIndex = min(s.index, courseware.slides.count - 1)
         didChange()
     }
@@ -110,16 +111,42 @@ final class DocumentModel: ObservableObject {
         finishEditing()
         guard let s = redoStack.popLast() else { return }
         undoStack.append(Snapshot(courseware: courseware, index: currentIndex))
-        courseware = s.courseware
+        courseware = s.courseware.named(courseware.title)
         currentIndex = min(s.index, courseware.slides.count - 1)
         didChange()
     }
 
+    /// Renames the courseware. A saved courseware is called what its file is called, so its file is
+    /// renamed with it, as in Finder; like a file name, the name stays out of undo.
     func rename(_ title: String) {
         let t = title.trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty, t != courseware.title else { return }
-        edit { $0.title = t }
+        if let url = fileURL {
+            let target = url.deletingLastPathComponent()
+                .appendingPathComponent(t.coursewareFileName).appendingPathExtension(url.pathExtension)
+            if target.path != url.path {
+                do { try FileManager.default.moveItem(at: url, to: target) } catch {
+                    // Most likely another courseware there already has this name; keep the old one.
+                    Self.reportError(error)
+                    return
+                }
+                fileURL = target
+                RecentFiles.replace(url, with: target)
+            }
+        } else {
+            isDirty = true
+        }
+        courseware.title = t
     }
+
+    /// Names the courseware after the file it is about to be saved as.
+    func takeName(from url: URL) {
+        courseware.title = url.coursewareName
+    }
+
+    /// Shows an error the user has to know about, such as a rename the disk refused.
+    /// The app shows an alert; tests leave it quiet.
+    static var reportError: @MainActor (Error) -> Void = { _ in }
 
     // MARK: Pages
 
@@ -387,17 +414,41 @@ final class DocumentModel: ObservableObject {
     }
 
     static func open(url: URL) throws -> (DocumentModel, [String]) {
+        let doc: DocumentModel, notes: [String]
         switch url.pathExtension.lowercased() {
         case "enbx":
             let (cw, warnings) = try EnbxImporter.load(url: url)
-            RecentFiles.add(url)
-            return (DocumentModel(courseware: cw), warnings)
+            (doc, notes) = (DocumentModel(courseware: cw), warnings)
         default:
             let (cw, missing) = try CoursewareArchive.load(Data(contentsOf: url))
-            RecentFiles.add(url)
-            return (DocumentModel(courseware: cw, fileURL: url), missing.map { "资源缺失：\($0)" })
+            (doc, notes) = (DocumentModel(courseware: cw, fileURL: url), missing.map { "资源缺失：\($0)" })
         }
+        // Called what its file is called, as on the home page, whatever name is stored inside.
+        doc.takeName(from: url)
+        RecentFiles.add(url)
+        return (doc, notes)
     }
+}
+
+private extension Courseware {
+    func named(_ title: String) -> Courseware {
+        var c = self
+        c.title = title
+        return c
+    }
+}
+
+extension URL {
+    /// A courseware file's name as Finder shows it, without the extension: a ":" in a file name
+    /// is the "/" Finder shows.
+    var coursewareName: String {
+        deletingPathExtension().lastPathComponent.replacingOccurrences(of: ":", with: "/")
+    }
+}
+
+extension String {
+    /// This courseware name as a file name, so a "/" in it comes back as "/" in Finder.
+    var coursewareFileName: String { replacingOccurrences(of: "/", with: ":") }
 }
 
 /// Recently opened courseware, newest first.
@@ -414,6 +465,14 @@ enum RecentFiles {
         list.removeAll { $0 == url.path }
         list.insert(url.path, at: 0)
         UserDefaults.standard.set(Array(list.prefix(20)), forKey: key)
+    }
+
+    /// Keeps a renamed file in its place in the list.
+    static func replace(_ old: URL, with new: URL) {
+        var list = UserDefaults.standard.stringArray(forKey: key) ?? []
+        list.removeAll { $0 == new.path }
+        list = list.map { $0 == old.path ? new.path : $0 }
+        UserDefaults.standard.set(list, forKey: key)
     }
 
     static func remove(_ url: URL) {

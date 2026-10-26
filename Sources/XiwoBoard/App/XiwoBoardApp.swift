@@ -22,6 +22,7 @@ struct XiwoBoardApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         if MainActor.assumeIsolated({ Snapshotter.runIfRequested() || InkBenchmark.runIfRequested() }) { return }
+        MainActor.assumeIsolated { DocumentModel.reportError = { Exporter.showError($0) } }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         Task { @MainActor in

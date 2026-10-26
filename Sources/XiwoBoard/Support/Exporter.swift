@@ -43,7 +43,7 @@ enum Exporter {
             guard let img = SlideRenderer.image(of: s, courseware: doc.courseware, pixelWidth: 1920,
                                                 options: RenderOptions(drawMasks: false)),
                   let data = pngData(img) else { continue }
-            try? data.write(to: dir.appendingPathComponent("\(doc.title)-\(i + 1).png"))
+            try? data.write(to: dir.appendingPathComponent("\(doc.title.coursewareFileName)-\(i + 1).png"))
         }
         NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
@@ -75,8 +75,10 @@ enum Exporter {
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.xiwoBoard]
             panel.nameFieldStringValue = doc.title + "." + CoursewareArchive.fileExtension
-            guard panel.runModal() == .OK else { return false }
-            url = panel.url
+            guard panel.runModal() == .OK, let chosen = panel.url else { return false }
+            // Saved under a new name, the courseware takes it, as the home page will show it.
+            doc.takeName(from: chosen)
+            url = chosen
         }
         guard let url else { return false }
         do { try doc.save(to: url); return true } catch { showError(error); return false }
