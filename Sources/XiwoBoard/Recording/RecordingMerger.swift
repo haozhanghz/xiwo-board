@@ -19,17 +19,21 @@ private protocol MergeFeed: AnyObject {
 /// ScreenCaptureKit writes the microphone as it comes in, with no gain, so a voice
 /// a little way from a laptop's microphone ends up well below what other videos
 /// play at. While the sound is written again it is raised to a common speaking
-/// level (`Leveler`); sound that is already that loud is left as it is.
+/// level (`Leveler`); sound that is already that loud is left as it is. The sound
+/// tracks named in `voiceTracks`, the microphone's, also go through macOS's voice
+/// isolation (`VoiceIsolator`), which takes out the pen tapping and scratching on
+/// the tablet, keys and other noise around the voice.
 enum RecordingMerger {
-    /// Raises a recording's quiet sound into `output`, the picture copied as recorded.
-    /// Returns false, writing nothing, when no sound track needs it.
-    static func level(_ recording: URL, into output: URL) async throws -> Bool {
-        try await join([recording], into: output, onlyIfLevelled: true)
+    /// Cleans up a recording's sound into `output`, the picture copied as recorded:
+    /// isolates the voice in `voiceTracks` and raises quiet sound. Returns false,
+    /// writing nothing, when there is nothing to do.
+    static func level(_ recording: URL, into output: URL, voiceTracks: Set<Int> = []) async throws -> Bool {
+        try await join([recording], into: output, onlyIfLevelled: true, voiceTracks: voiceTracks)
     }
 
-    static func merge(_ parts: [URL], into output: URL) async throws {
+    static func merge(_ parts: [URL], into output: URL, voiceTracks: Set<Int> = []) async throws {
         do {
-            try await join(parts, into: output)
+            try await join(parts, into: output, voiceTracks: voiceTracks)
         } catch MergeError.empty {
             throw MergeError.empty
         } catch {
@@ -56,9 +60,9 @@ enum RecordingMerger {
     }
 
     /// Joins `urls` into `output`. With `onlyIfLevelled`, writes nothing and returns
-    /// false when the sound is loud enough as it is.
+    /// false when the sound is loud enough as it is and has no voice to isolate.
     @discardableResult
-    static func join(_ urls: [URL], into output: URL, onlyIfLevelled: Bool = false) async throws -> Bool {
+    static func join(_ urls: [URL], into output: URL, onlyIfLevelled: Bool = false, voiceTracks: Set<Int> = []) async throws -> Bool {
         var parts: [Part] = []
         var cursor = CMTime.zero
         for url in urls {
@@ -95,16 +99,18 @@ enum RecordingMerger {
         let lead = try decodeLead(of: parts[0])
         for i in parts.indices { parts[i].start = parts[i].start + lead }
 
-        var sounds: [(channels: Int, gain: Float)] = []
+        var sounds: [(channels: Int, gain: Float, voice: Bool)] = []
         for n in 0..<(parts.map(\.sound.count).max() ?? 0) {
             let source = parts.lazy.compactMap { $0.sound.count > n ? $0.sound[n] : nil }.first!
             let format = try await source.load(.formatDescriptions).first
             let sourceChannels = format.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mChannelsPerFrame } ?? 1
-            let channels = Int(min(2, max(1, sourceChannels)))
-            sounds.append((channels, try Leveler.gain(for: parts, track: n, channels: channels)))
+            // A voice is one sound; its isolation works on one channel.
+            let voice = voiceTracks.contains(n) && VoiceIsolator.isAvailable
+            let channels = voice ? 1 : Int(min(2, max(1, sourceChannels)))
+            sounds.append((channels, try Leveler.gain(for: parts, track: n, channels: channels, isolatingVoice: voice), voice))
         }
-        log.info("Sound gains: \(sounds.map { String(format: "%.1f dB", 20 * log10($0.gain)) }.joined(separator: ", "), privacy: .public)")
-        if onlyIfLevelled, !sounds.contains(where: { $0.gain > 1 }) { return false }
+        log.info("Sound gains: \(sounds.map { String(format: "%.1f dB%@", 20 * log10($0.gain), $0.voice ? " (voice)" : "") }.joined(separator: ", "), privacy: .public)")
+        if onlyIfLevelled, !sounds.contains(where: { $0.gain > 1 || $0.voice }) { return false }
 
         try? FileManager.default.removeItem(at: output)
         let writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
@@ -118,7 +124,7 @@ enum RecordingMerger {
             writer.add(input)
             feeds.append((input, PictureFeed(parts: parts, tick: CMTime(value: 1, timescale: try await first.load(.naturalTimeScale)))))
         }
-        for (n, (channels, gain)) in sounds.enumerated() {
+        for (n, (channels, gain, voice)) in sounds.enumerated() {
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: SoundFeed.rate, AVNumberOfChannelsKey: channels,
                 AVEncoderBitRateKey: channels == 1 ? 96_000 : 160_000,
@@ -126,7 +132,8 @@ enum RecordingMerger {
             input.expectsMediaDataInRealTime = false
             guard writer.canAdd(input) else { throw MergeError.cannotJoin }
             writer.add(input)
-            feeds.append((input, try SoundFeed(parts: parts, track: n, channels: channels, gain: gain)))
+            feeds.append((input, try SoundFeed(parts: parts, track: n, channels: channels, gain: gain,
+                                                    isolator: voice ? VoiceIsolator() : nil)))
         }
         guard !feeds.isEmpty else { throw MergeError.empty }
 
@@ -287,6 +294,7 @@ enum RecordingMerger {
         private let track: Int
         private let channels: Int
         private let gain: Float
+        private let isolator: VoiceIsolator?
         private let format: CMAudioFormatDescription
         private var bytesPerFrame: Int { channels * 2 }
         private var index = -1
@@ -294,14 +302,20 @@ enum RecordingMerger {
         private var output: AVAssetReaderTrackOutput?
         /// The frame the next sound written starts at.
         private var written: Int
+        /// The frame the next sound handed to the writer starts at; behind `written` by
+        /// what the isolator still holds.
+        private var delivered: Int
         private var pending: [CMSampleBuffer] = []
+        private var drained = false
 
-        init(parts: [Part], track: Int, channels: Int, gain: Float = 1) throws {
+        init(parts: [Part], track: Int, channels: Int, gain: Float = 1, isolator: VoiceIsolator? = nil) throws {
             self.parts = parts
             self.track = track
             self.channels = channels
             self.gain = gain
+            self.isolator = isolator
             written = Self.frame(at: parts[0].start)
+            delivered = written
             var asbd = AudioStreamBasicDescription(
                 mSampleRate: Double(Self.rate), mFormatID: kAudioFormatLinearPCM,
                 mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
@@ -330,7 +344,12 @@ enum RecordingMerger {
                     continue
                 }
                 index += 1
-                guard index < parts.count else { return nil }
+                guard index < parts.count else {
+                    guard let isolator, !drained else { return nil }
+                    drained = true
+                    try deliver(try isolator.finish())
+                    continue
+                }
                 let part = parts[index]
                 guard part.sound.count > track else {
                     try silence(until: Self.frame(at: part.end))
@@ -374,12 +393,6 @@ enum RecordingMerger {
                 CMBlockBufferCopyDataBytes(block, atOffset: skip * bytesPerFrame, dataLength: keep * bytesPerFrame, destination: $0.baseAddress!)
             }
             guard status == noErr else { throw MergeError.cannotJoin }
-            if gain != 1 {
-                bytes.withUnsafeMutableBytes { raw in
-                    let samples = raw.bindMemory(to: Int16.self)
-                    for i in samples.indices { samples[i] = Leveler.raise(samples[i], by: gain) }
-                }
-            }
             try emit(bytes)
         }
 
@@ -389,9 +402,25 @@ enum RecordingMerger {
             }
         }
 
+        /// Writes the next stretch of the joined track: through the isolator, if any,
+        /// then raised by the gain.
         private func emit(_ bytes: Data) throws {
             let frames = bytes.count / bytesPerFrame
             guard frames > 0 else { return }
+            written += frames
+            try deliver(try isolator?.process(bytes) ?? bytes)
+        }
+
+        private func deliver(_ sound: Data) throws {
+            var bytes = sound
+            let frames = bytes.count / bytesPerFrame
+            guard frames > 0 else { return }
+            if gain != 1 {
+                bytes.withUnsafeMutableBytes { raw in
+                    let samples = raw.bindMemory(to: Int16.self)
+                    for i in samples.indices { samples[i] = Leveler.raise(samples[i], by: gain) }
+                }
+            }
             var block: CMBlockBuffer?
             var status = CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes.count, blockAllocator: nil,
                                                             customBlockSource: nil, offsetToData: 0, dataLength: bytes.count,
@@ -404,11 +433,11 @@ enum RecordingMerger {
             var sample: CMSampleBuffer?
             status = CMAudioSampleBufferCreateReadyWithPacketDescriptions(
                 allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: frames,
-                presentationTimeStamp: CMTime(value: CMTimeValue(written), timescale: CMTimeScale(Self.rate)),
+                presentationTimeStamp: CMTime(value: CMTimeValue(delivered), timescale: CMTimeScale(Self.rate)),
                 packetDescriptions: nil, sampleBufferOut: &sample)
             guard status == noErr, let sample else { throw MergeError.cannotJoin }
             pending.append(sample)
-            written += frames
+            delivered += frames
         }
     }
 
@@ -431,12 +460,30 @@ enum RecordingMerger {
         /// Where `raise` starts rounding peaks off, as a share of full scale.
         static let knee: Float = 0.6
 
-        static func gain(for parts: [Part], track: Int, channels: Int) throws -> Float {
+        /// With `isolatingVoice` the level is that of the isolated voice, so the pen's
+        /// taps, which isolation takes out, do not hold the gain back.
+        static func gain(for parts: [Part], track: Int, channels: Int, isolatingVoice: Bool = false) throws -> Float {
             let block = SoundFeed.rate / 10 * channels
             var energies: [Float] = []
             var sum: Double = 0, count = 0
             // Peaks in 1/1000ths of full scale, to find the level the loudest 0.1% reach.
             var peaks = [Int](repeating: 0, count: 1001)
+            func measure(_ bytes: Data) {
+                bytes.withUnsafeBytes { raw in
+                    for value in raw.bindMemory(to: Int16.self) {
+                        let x = Double(value) / 32768
+                        sum += x * x
+                        count += 1
+                        peaks[min(1000, Int(abs(x) * 1000))] += 1
+                        if count == block {
+                            energies.append(Float(sum / Double(count)))
+                            sum = 0
+                            count = 0
+                        }
+                    }
+                }
+            }
+            let isolator = isolatingVoice ? try VoiceIsolator() : nil
             for part in parts where part.sound.count > track {
                 let (reader, output) = try SoundFeed.decoder(for: part, track: track, channels: channels)
                 while let buffer = output.copyNextSampleBuffer() {
@@ -447,22 +494,11 @@ enum RecordingMerger {
                         CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: length, destination: $0.baseAddress!)
                     }
                     guard status == noErr else { throw MergeError.cannotJoin }
-                    bytes.withUnsafeBytes { raw in
-                        for value in raw.bindMemory(to: Int16.self) {
-                            let x = Double(value) / 32768
-                            sum += x * x
-                            count += 1
-                            peaks[min(1000, Int(abs(x) * 1000))] += 1
-                            if count == block {
-                                energies.append(Float(sum / Double(count)))
-                                sum = 0
-                                count = 0
-                            }
-                        }
-                    }
+                    measure(try isolator?.process(bytes) ?? bytes)
                 }
                 if reader.status == .failed { throw reader.error ?? MergeError.cannotJoin }
             }
+            if let isolator { measure(try isolator.finish()) }
             let floorEnergy = pow(10, floor / 10)
             let heard = energies.filter { $0 > floorEnergy }
             guard !heard.isEmpty else { return 1 }
@@ -487,6 +523,96 @@ enum RecordingMerger {
             guard magnitude > knee else { return Int16(x * 32768) }
             let rounded = knee + (1 - knee) * tanh((magnitude - knee) / (1 - knee))
             return Int16(max(-32768, min(32767, (x < 0 ? -rounded : rounded) * 32768)))
+        }
+    }
+
+    /// Runs mono 16-bit sound at `SoundFeed.rate` through macOS's voice isolation
+    /// (AUSoundIsolation, the 「语音突显」 of FaceTime and Final Cut), which keeps the
+    /// voice and takes out pen taps, scratching and other noise.
+    ///
+    /// The unit holds sound back by `delay`; `process` drops that much from the start
+    /// and `finish` lets the rest out, so what comes out lines up with what went in.
+    final class VoiceIsolator {
+        /// How far behind its input the unit's output runs: 56 ms, measured on macOS
+        /// 27 at 44.1 and 48 kHz. The unit reports no latency of its own.
+        static let delay = 2704
+        static let description = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_AUSoundIsolation,
+            componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
+        static var isAvailable: Bool {
+            var description = description
+            return AudioComponentFindNext(nil, &description) != nil
+        }
+
+        private let engine = AVAudioEngine()
+        private let input = Queue()
+        private let buffer: AVAudioPCMBuffer
+        private var toDrop = delay
+        private static let chunk: AVAudioFrameCount = 4800
+
+        /// The samples the unit pulls next.
+        private final class Queue {
+            var samples: [Float] = []
+            var read = 0
+        }
+
+        init() throws {
+            guard let format = AVAudioFormat(standardFormatWithSampleRate: Double(SoundFeed.rate), channels: 1) else {
+                throw MergeError.cannotJoin
+            }
+            let input = self.input
+            let source = AVAudioSourceNode(format: format) { _, _, frames, list in
+                let out = UnsafeMutableAudioBufferListPointer(list)[0].mData!.assumingMemoryBound(to: Float.self)
+                for i in 0..<Int(frames) {
+                    out[i] = input.read < input.samples.count ? input.samples[input.read] : 0
+                    input.read += 1
+                }
+                return noErr
+            }
+            let isolation = AVAudioUnitEffect(audioComponentDescription: Self.description)
+            engine.attach(source)
+            engine.attach(isolation)
+            engine.connect(source, to: isolation, format: format)
+            engine.connect(isolation, to: engine.mainMixerNode, format: format)
+            try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: Self.chunk)
+            try engine.start()
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: Self.chunk) else {
+                throw MergeError.cannotJoin
+            }
+            self.buffer = buffer
+        }
+
+        deinit { engine.stop() }
+
+        /// The isolated sound for `bytes`, `delay` frames later.
+        func process(_ bytes: Data) throws -> Data {
+            input.samples = bytes.withUnsafeBytes { $0.bindMemory(to: Int16.self).map { Float($0) / 32768 } }
+            input.read = 0
+            return try render(input.samples.count)
+        }
+
+        /// What the unit still holds.
+        func finish() throws -> Data {
+            input.samples = []
+            input.read = 0
+            return try render(Self.delay)
+        }
+
+        private func render(_ frames: Int) throws -> Data {
+            var out = Data(capacity: frames * 2)
+            var done = 0
+            while done < frames {
+                let n = min(Int(Self.chunk), frames - done)
+                guard try engine.renderOffline(AVAudioFrameCount(n), to: buffer) == .success, Int(buffer.frameLength) == n else {
+                    throw MergeError.cannotJoin
+                }
+                done += n
+                let drop = min(toDrop, n)
+                toDrop -= drop
+                let samples = UnsafeBufferPointer(start: buffer.floatChannelData![0] + drop, count: n - drop)
+                samples.map { Int16(max(-32768, min(32767, ($0 * 32768).rounded()))) }.withUnsafeBytes { out.append(contentsOf: $0) }
+            }
+            return out
         }
     }
 
