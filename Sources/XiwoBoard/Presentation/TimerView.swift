@@ -27,34 +27,52 @@ struct TimerView: View {
                 .frame(width: 150)
                 .onChange(of: mode) { _, _ in reset() }
                 Spacer()
-                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(QuietButtonStyle())
+                .accessibilityLabel("关闭计时器")
             }
             Text(format(mode == .countdown ? remaining : elapsed))
-                .font(.system(size: 64, weight: .bold, design: .rounded).monospacedDigit())
-                .foregroundStyle(mode == .countdown && remaining <= 10 && running ? .red : .primary)
+                .font(.system(size: 64, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(mode == .countdown && remaining <= 10 && running ? Color(red: 1, green: 0.45, blue: 0.42) : .primary)
                 .frame(minWidth: 260)
             if mode == .countdown && !running {
                 HStack {
                     ForEach([30.0, 60, 180, 300, 600], id: \.self) { s in
-                        Button(s < 60 ? "\(Int(s))秒" : "\(Int(s / 60))分") { total = s; remaining = s }
-                            .buttonStyle(.bordered)
+                        Button { total = s; remaining = s } label: {
+                            Text(s < 60 ? "\(Int(s))秒" : "\(Int(s / 60))分")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(total == s ? Theme.accent : .primary)
+                                .padding(.horizontal, 10).frame(height: 26)
+                                .background(total == s ? Theme.accent.opacity(0.2) : Color.white.opacity(0.08), in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 HStack {
-                    Button { adjust(-60) } label: { Image(systemName: "minus") }
-                    Button { adjust(60) } label: { Image(systemName: "plus") }
-                    Text("每次 1 分钟").font(.caption).foregroundStyle(.secondary)
+                    Button { adjust(-60) } label: { stepIcon("minus") }.buttonStyle(QuietButtonStyle()).help("减 1 分钟")
+                    Button { adjust(60) } label: { stepIcon("plus") }.buttonStyle(QuietButtonStyle()).help("加 1 分钟")
                 }
             }
             HStack(spacing: 12) {
-                Button(running ? "暂停" : "开始") { running.toggle(); lastTick = Date() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.space, modifiers: [])
-                Button("重置", action: reset).buttonStyle(.bordered)
+                Button { running.toggle(); lastTick = Date() } label: {
+                    Text(running ? "暂停" : "开始").frame(width: 92)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .keyboardShortcut(.space, modifiers: [])
+                Button { reset() } label: {
+                    Text("重置").font(.system(size: 13)).padding(.horizontal, 14).frame(height: 30)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(18)
+        .presenterPanel(cornerRadius: 16)
         .environment(\.colorScheme, .dark)
         .padding(4)
         .fixedSize()
@@ -72,6 +90,10 @@ struct TimerView: View {
                 elapsed += dt
             }
         }
+    }
+
+    private func stepIcon(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 12, weight: .medium)).frame(width: 28, height: 24).contentShape(Rectangle())
     }
 
     private func adjust(_ d: TimeInterval) {

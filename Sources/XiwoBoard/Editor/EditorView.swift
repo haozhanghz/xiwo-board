@@ -12,22 +12,23 @@ struct EditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             EditorToolbar(doc: doc)
-            Divider()
+            Hairline()
             HStack(spacing: 0) {
                 SlideSidebar(doc: doc)
-                    .frame(width: 180)
-                Divider()
+                    .frame(width: 176)
+                Hairline(vertical: true)
                 CanvasHost(doc: doc, tools: tools, mode: .edit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if inspectorShown {
-                    Divider()
+                    Hairline(vertical: true)
                     InspectorView(doc: doc)
-                        .frame(width: 270)
+                        .frame(width: 264)
                 }
             }
-            Divider()
+            Hairline()
             StatusBar(doc: doc)
         }
+        .tint(Theme.accent)
         .onAppear { tools.tool = .select }
     }
 }
@@ -55,22 +56,35 @@ struct CanvasHost: NSViewRepresentable {
     }
 }
 
+/// A one-point line in the theme's line colour, between panels.
+struct Hairline: View {
+    var vertical = false
+
+    var body: some View {
+        Rectangle().fill(Theme.line)
+            .frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
+    }
+}
+
 struct StatusBar: View {
     @ObservedObject var doc: DocumentModel
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             Text("第 \(doc.currentIndex + 1) / \(doc.slideCount) 页")
             if !doc.selection.isEmpty { Text("已选择 \(doc.selection.count) 个对象") }
             Spacer()
-            Text(doc.isDirty ? "未保存" : (doc.fileURL == nil ? "新课件" : "已保存"))
-            Text("\(Int(doc.courseware.slideSize.width))×\(Int(doc.courseware.slideSize.height))")
+            HStack(spacing: 5) {
+                Circle().fill(doc.isDirty ? Theme.accent : Theme.tertiaryText).frame(width: 6, height: 6)
+                Text(doc.isDirty ? "未保存" : (doc.fileURL == nil ? "新课件" : "已保存"))
+            }
+            Text("\(Int(doc.courseware.slideSize.width)) × \(Int(doc.courseware.slideSize.height))")
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .frame(height: 24)
-        .background(.bar)
+        .font(.system(size: 11).monospacedDigit())
+        .foregroundStyle(Theme.secondaryText)
+        .padding(.horizontal, 14)
+        .frame(height: 26)
+        .background(Theme.background)
     }
 }
 
@@ -96,21 +110,36 @@ struct SlideSidebar: View {
                             Button("删除页面", role: .destructive) { doc.deleteSlide(at: index) }
                         }
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 6, bottom: 5, trailing: 12))
                 }
                 .onMove { doc.moveSlide(from: $0, to: $1) }
             }
-            .listStyle(.sidebar)
-            Divider()
-            HStack {
-                Button { doc.addSlide() } label: { Label("新建页面", systemImage: "plus") }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .padding(.top, 6)
+            HStack(spacing: 2) {
+                Button { doc.addSlide() } label: {
+                    Label("新建页面", systemImage: "plus")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.text)
+                        .padding(.horizontal, 8).frame(height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(QuietButtonStyle())
                 Spacer()
-                Button { doc.deleteSlide(at: doc.currentIndex) } label: { Image(systemName: "trash") }
-                    .help("删除当前页")
+                Button { doc.deleteSlide(at: doc.currentIndex) } label: {
+                    Image(systemName: "trash").font(.system(size: 12))
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(QuietButtonStyle())
+                .help("删除当前页")
+                .accessibilityLabel("删除当前页")
             }
-            .buttonStyle(.borderless)
-            .padding(8)
+            .padding(.horizontal, 8).padding(.vertical, 8)
         }
+        .background(Theme.sidebar)
     }
 }
 
@@ -126,11 +155,17 @@ struct SlideThumbnailRow: View, Equatable {
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
-            Text("\(index + 1)").font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 16, alignment: .trailing)
+            Text("\(index + 1)")
+                .font(.system(size: 11, weight: selected ? .semibold : .regular).monospacedDigit())
+                .foregroundStyle(selected ? Theme.text : Theme.tertiaryText)
+                .frame(width: 16, alignment: .trailing)
+                .padding(.top, 2)
             SlidePreview(slide: slide, courseware: courseware, pixelWidth: 280)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(selected ? Color.accentColor : Color.gray.opacity(0.3),
-                                                                  lineWidth: selected ? 2.5 : 1))
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Theme.line))
+                .padding(3)
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2))
         }
     }
 }

@@ -208,14 +208,14 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let started = drawObserver == nil ? 0 : CACurrentMediaTime()
         defer { drawObserver?(dirtyRect, CACurrentMediaTime() - started) }
-        ctx.setFillColor((mode == .edit ? NSColor.underPageBackgroundColor : NSColor.black).cgColor)
+        ctx.setFillColor((mode == .edit ? Theme.nsBackdrop : NSColor.black).cgColor)
         ctx.fill(bounds)
         let r = slideRect
         if mode == .edit {
             ctx.saveGState()
             // The shadow only shows outside the page; skip its blur when redrawing just a patch of ink.
             if !r.contains(dirtyRect) {
-                ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 10, color: NSColor.black.withAlphaComponent(0.25).cgColor)
+                ctx.setShadow(offset: CGSize(width: 0, height: 1), blur: 12, color: NSColor.black.withAlphaComponent(0.12).cgColor)
             }
             ctx.setFillColor(NSColor.white.cgColor)
             ctx.fill(r)

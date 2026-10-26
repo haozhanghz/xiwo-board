@@ -363,16 +363,20 @@ struct UpdateView: View {
             HStack(spacing: 14) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("讲课板更新").font(.title3.bold())
-                    Text("当前版本 \(updater.currentVersion)").foregroundStyle(.secondary)
+                    Text("讲课板更新").font(.system(size: 17, weight: .semibold))
+                    Text("当前版本 \(updater.currentVersion)").font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
                 }
             }
             status
-            Divider()
+            Hairline()
             Toggle("启动时自动检查更新", isOn: $updater.autoCheck)
+                .toggleStyle(SettingToggleStyle())
+                .font(.system(size: 12))
         }
-        .padding(20)
+        .padding(24)
         .frame(width: 460)
+        .background(Theme.background)
+        .tint(Theme.accent)
     }
 
     @ViewBuilder private var status: some View {
@@ -389,7 +393,7 @@ struct UpdateView: View {
             }
         case .available(let r):
             VStack(alignment: .leading, spacing: 10) {
-                Text("发现新版本 \(r.version)").font(.headline)
+                Text("发现新版本 \(r.version)").font(.system(size: 14, weight: .semibold))
                 ReleaseNotes(text: r.notes)
                 if updater.movesToApplications {
                     Text("讲课板现在在只读的临时位置运行（比如直接在「下载」里打开）。新版本会装进「应用程序」文件夹，以后请从那里打开。")
@@ -398,10 +402,12 @@ struct UpdateView: View {
                 }
                 HStack {
                     Button("跳过这个版本") { updater.skip(r) }
+                        .buttonStyle(.plain).foregroundStyle(Theme.secondaryText)
                     Link("在网页上查看", destination: r.page)
+                        .foregroundStyle(Theme.secondaryText)
                     Spacer()
                     Button("下载并安装") { Task { await updater.download(r) } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(PrimaryButtonStyle())
                         .keyboardShortcut(.defaultAction)
                 }
             }
@@ -416,7 +422,7 @@ struct UpdateView: View {
                 HStack {
                     Spacer()
                     Button("立即重新打开") { updater.installAndRelaunch() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(PrimaryButtonStyle())
                         .keyboardShortcut(.defaultAction)
                 }
             }
@@ -443,11 +449,12 @@ private struct ReleaseNotes: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(12)
         }
-        .frame(height: 220)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+        .font(.system(size: 13))
+        .frame(height: 200)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line))
     }
 
     @ViewBuilder private func row(_ line: String) -> some View {

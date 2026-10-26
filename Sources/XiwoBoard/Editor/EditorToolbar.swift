@@ -27,23 +27,28 @@ struct RibbonButton: View {
     var label: String? = nil
     let action: () -> Void
     @Environment(\.ribbonDensity) private var density
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Labels sit a step quieter than icons, so the row reads as a row of icons.
+    private var labelColor: Color { colorScheme == .dark ? Color.white.opacity(0.7) : Theme.secondaryText }
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage).font(.system(size: 17, weight: .medium)).frame(height: 20)
+            VStack(spacing: 2) {
+                Image(systemName: systemImage).font(.system(size: 16, weight: .regular)).frame(height: 20)
                 if density != .iconOnly {
                     // Even-width digits, so a ticking time does not change the button's width.
-                    Text(title).font(.system(size: 11).monospacedDigit()).fixedSize()
+                    Text(title).font(.system(size: 10.5).monospacedDigit()).fixedSize()
+                        .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(tint ?? labelColor))
                 }
             }
-            .frame(minWidth: density == .regular ? 46 : 32, minHeight: density == .iconOnly ? 34 : 0)
-            .padding(.vertical, 5).padding(.horizontal, density == .regular ? 4 : 2)
-            .foregroundStyle(active ? Color.accentColor : (tint ?? Color.primary))
-            .background(active ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            .frame(minWidth: density == .regular ? 44 : 32, minHeight: density == .iconOnly ? 32 : 0)
+            .padding(.vertical, 4).padding(.horizontal, density == .regular ? 4 : 2)
+            .foregroundStyle(active ? Theme.accent : (tint ?? Theme.text))
+            .background(active ? Theme.accent.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietButtonStyle())
         .help(title)
         .accessibilityLabel(label ?? title)
         .accessibilityAddTraits(active ? .isSelected : [])
@@ -77,12 +82,24 @@ struct EditorToolbar: View {
     var body: some View {
         HStack(spacing: 2) {
             Button { app.closeDocument() } label: {
-                Image(systemName: "house").frame(width: 30, height: 26).contentShape(Rectangle())
+                Image(systemName: "house").font(.system(size: 14)).foregroundStyle(Theme.secondaryText)
+                    .frame(width: 30, height: 28).contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(QuietButtonStyle())
             .help("返回首页")
             .accessibilityLabel("返回首页")
-            .padding(.leading, 76) // clear the traffic lights
+            .padding(.leading, 78) // clear the traffic lights
+
+            Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 8)
+
+            TextField("课件名称", text: Binding(get: { doc.pendingTitle ?? doc.title }, set: { doc.pendingTitle = $0 }))
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.text)
+                .frame(width: min(220, max(60, CGFloat((doc.pendingTitle ?? doc.title).count) * 13.5 + 8)))
+                .focused($titleFocused)
+                .onSubmit { doc.finishEditing() }
+                .onChange(of: titleFocused) { _, focused in if !focused { doc.finishEditing() } }
 
             Menu {
                 Button("新建课件") { app.newDocument() }
@@ -97,20 +114,17 @@ struct EditorToolbar: View {
                 Divider()
                 Button("返回首页") { app.closeDocument() }
             } label: {
-                Image(systemName: "line.3.horizontal")
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 22, height: 24).contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(QuietButtonStyle(cornerRadius: 6))
             .menuIndicator(.hidden)
-            .frame(width: 30)
+            .fixedSize()
+            .help("文件")
             .accessibilityLabel("文件菜单")
-
-            TextField("课件名称", text: Binding(get: { doc.pendingTitle ?? doc.title }, set: { doc.pendingTitle = $0 }))
-                .textFieldStyle(.plain)
-                .font(.headline)
-                .frame(width: 140)
-                .focused($titleFocused)
-                .onSubmit { doc.finishEditing() }
-                .onChange(of: titleFocused) { _, focused in if !focused { doc.finishEditing() } }
+            .padding(.trailing, 12)
 
             // Labels shrink, then disappear, so 授课 stays visible in narrow windows.
             ViewThatFits(in: .horizontal) {
@@ -121,31 +135,25 @@ struct EditorToolbar: View {
                     toolButtons.environment(\.ribbonDensity, .iconOnly)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .padding(.trailing, 8)
 
-            RibbonButton(title: "属性", systemImage: "sidebar.right", active: inspectorShown,
-                         label: inspectorShown ? "收起属性面板" : "显示属性面板") { inspectorShown.toggle() }
-                .keyboardShortcut("i", modifiers: [.command, .option])
-                .padding(.trailing, 6)
-
-            Menu {
-                Button("从当前页开始") { app.startPresentation() }
-                Button("从第一页开始") { app.startPresentation(fromBeginning: true) }
-            } label: {
-                Label("授课", systemImage: "play.rectangle.fill")
-                    .font(.headline)
-            } primaryAction: {
-                app.startPresentation()
+            Button { inspectorShown.toggle() } label: {
+                Image(systemName: "sidebar.right").font(.system(size: 15))
+                    .foregroundStyle(inspectorShown ? Theme.text : Theme.secondaryText)
+                    .frame(width: 32, height: 28).contentShape(Rectangle())
             }
-            .menuStyle(.button)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .fixedSize()
-            .padding(.trailing, 12)
+            .buttonStyle(QuietButtonStyle(active: inspectorShown))
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .help(inspectorShown ? "收起属性面板（⌥⌘I）" : "显示属性面板（⌥⌘I）")
+            .accessibilityLabel(inspectorShown ? "收起属性面板" : "显示属性面板")
+            .padding(.trailing, 8)
+
+            PresentButton(app: app)
+                .padding(.trailing, 14)
         }
-        .padding(.vertical, 6)
-        .background(.bar)
+        .frame(height: 52)
+        .background(Theme.background)
     }
 
     private var toolButtons: some View {
@@ -178,11 +186,55 @@ struct EditorToolbar: View {
         .fixedSize()
     }
 
-    private var divider: some View { Divider().frame(height: 34).padding(.horizontal, 4) }
+    private var divider: some View { Rectangle().fill(Theme.line).frame(width: 1, height: 22).padding(.horizontal, 6) }
 
     private var isShapeTool: Bool {
         if case .shape = tools.tool { return true }
         return false
+    }
+}
+
+/// 授课: the one filled button in the editor, with a menu for where to start.
+struct PresentButton: View {
+    let app: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button { app.startPresentation() } label: {
+                Label("授课", systemImage: "play.fill")
+                    .labelStyle(PresentLabelStyle())
+                    .padding(.leading, 12).padding(.trailing, 10)
+                    .frame(height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("从当前页开始授课（⌘↩）")
+            Rectangle().fill(.white.opacity(0.28)).frame(width: 1, height: 16)
+            Menu {
+                Button("从当前页开始") { app.startPresentation() }
+                Button("从第一页开始") { app.startPresentation(fromBeginning: true) }
+            } label: {
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                    .frame(width: 26, height: 30).contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("授课选项")
+        }
+        .foregroundStyle(.white)
+        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .fixedSize()
+    }
+
+    private struct PresentLabelStyle: LabelStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 6) {
+                configuration.icon.font(.system(size: 10))
+                configuration.title.font(.system(size: 13, weight: .semibold))
+            }
+        }
     }
 }
 
@@ -201,14 +253,16 @@ struct PenSettings: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             // Stays in place for the other pens, so the popover keeps its size.
-            Toggle("笔锋（写快变细，提笔出锋）", isOn: $tools.penNib)
+            Toggle("笔锋", isOn: $tools.penNib)
+                .toggleStyle(SettingToggleStyle())
+                .help("写快变细，提笔出锋")
                 .disabled(tools.penKind != .pen)
             HStack(spacing: 0) {
                 ForEach(ToolState.penWidths, id: \.self) { w in
                     Button { tools.penWidth = tools.penKind == .highlighter ? w * 3 : w } label: {
                         Circle().fill(Color.primary).frame(width: dotSize(w), height: dotSize(w))
                             .frame(width: 32, height: 32)
-                            .background(isWidth(w) ? Color.accentColor.opacity(0.2) : .clear, in: Circle())
+                            .background(isWidth(w) ? Theme.accent.opacity(0.18) : .clear, in: Circle())
                             // The whole cell takes the click, not just the dot: a thin pen's dot is a few points wide.
                             .frame(maxWidth: .infinity, minHeight: 36)
                             .contentShape(Rectangle())
@@ -236,24 +290,39 @@ struct ColorSwatches: View {
     var palette: [RGBA] = RGBA.penPalette
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 26), spacing: 3)], alignment: .leading, spacing: 4) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 24), spacing: 2)], alignment: .leading, spacing: 4) {
             ForEach(palette, id: \.self) { c in
                 Button { selection = c } label: {
                     Circle().fill(Color(nsColor: c.nsColor))
-                        .overlay(Circle().stroke(Color.gray.opacity(0.5), lineWidth: 1))
+                        .overlay(Circle().strokeBorder(Theme.line))
                         .frame(width: 18, height: 18)
-                        .frame(minWidth: 26, minHeight: 26)
+                        .padding(2)
+                        .overlay(Circle().strokeBorder(selection == c ? Theme.text : .clear, lineWidth: 1.5))
+                        .frame(minWidth: 24, minHeight: 24)
                         .contentShape(Rectangle())
-                        .overlay(Circle().stroke(selection == c ? Color.accentColor : .clear, lineWidth: 2))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(colorName(c))
                 .accessibilityAddTraits(selection == c ? .isSelected : [])
             }
-            ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
-                                               set: { selection = RGBA(NSColor($0)) }))
-                .labelsHidden()
-                .frame(width: 26)
+            // Any other colour: a rainbow dot that opens the system colour panel.
+            ZStack {
+                Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().fill(Color(nsColor: selection.nsColor)).frame(width: 9, height: 9))
+                    .padding(2)
+                    .overlay(Circle().strokeBorder(RGBA.penPalette.contains(selection) || palette.contains(selection)
+                                                   ? .clear : Theme.text, lineWidth: 1.5))
+                    .allowsHitTesting(false)
+                ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
+                                                   set: { selection = RGBA(NSColor($0)) }))
+                    .labelsHidden()
+                    .opacity(0.02)
+                    .frame(width: 22, height: 22)
+                    .clipShape(Circle())
+            }
+            .frame(minWidth: 24, minHeight: 24)
+            .help("自定义颜色")
         }
     }
 
