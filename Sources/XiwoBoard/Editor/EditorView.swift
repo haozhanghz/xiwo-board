@@ -6,6 +6,8 @@ struct EditorView: View {
     @ObservedObject var doc: DocumentModel
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var tools: ToolState
+    /// The inspector starts collapsed: most lessons are written on the board, not styled here.
+    @AppStorage("InspectorShown") private var inspectorShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,9 +19,11 @@ struct EditorView: View {
                 Divider()
                 CanvasHost(doc: doc, tools: tools, mode: .edit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                InspectorView(doc: doc)
-                    .frame(width: 270)
+                if inspectorShown {
+                    Divider()
+                    InspectorView(doc: doc)
+                        .frame(width: 270)
+                }
             }
             Divider()
             StatusBar(doc: doc)

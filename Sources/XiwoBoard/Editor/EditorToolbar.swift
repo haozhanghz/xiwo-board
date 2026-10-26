@@ -72,6 +72,7 @@ struct EditorToolbar: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var tools: ToolState
     @FocusState private var titleFocused: Bool
+    @AppStorage("InspectorShown") private var inspectorShown = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -115,6 +116,11 @@ struct EditorToolbar: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, 8)
+
+            RibbonButton(title: "属性", systemImage: "sidebar.right", active: inspectorShown,
+                         label: inspectorShown ? "收起属性面板" : "显示属性面板") { inspectorShown.toggle() }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .padding(.trailing, 6)
 
             Menu {
                 Button("从当前页开始") { app.startPresentation() }

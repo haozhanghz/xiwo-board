@@ -27,7 +27,7 @@ struct HomeView: View {
                                 Button { app.openWithPanel() } label: { Label("打开课件…", systemImage: "folder") }
                             }
                             .controlSize(.large)
-                            Text("背景和书写格（绿板、方格、田字格等）在编辑界面右侧的「页面背景」里改。")
+                            Text("背景和书写格（绿板、方格、田字格等）在编辑界面点「属性」打开面板来改。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, minHeight: 240)
