@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds XiwoBoard.app (arm64) into build/. Run on macOS 15+ with Xcode 16+.
+# Builds XiwoBoard.app (讲课板, arm64) into build/. Run on macOS 15+ with Xcode 16+.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,6 +12,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/XiwoBoard"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# Shown name: 讲课板 on Chinese systems, TeachBoard elsewhere. The bundle stays XiwoBoard.app
+# so in-app updates and granted permissions carry over.
+cp -R Resources/*.lproj "$APP/Contents/Resources/"
 
 # App icon from the 1024px master.
 if [ -f Resources/AppIcon-1024.png ]; then

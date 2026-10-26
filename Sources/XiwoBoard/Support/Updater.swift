@@ -303,8 +303,8 @@ final class Updater: ObservableObject {
             case .checksumMismatch: return "下载的文件校验不通过，可能下载不完整，请重试。"
             case .badArchive: return "安装包内容不对（应用标识或版本号不符）。"
             case .toolFailed(let tool, let code): return "\(tool) 执行失败（\(code)）。"
-            case .translocated: return "XiwoBoard 正在只读的临时位置运行，也没有权限写入「应用程序」文件夹。请退出后在 Finder 里把它拖进「应用程序」，从那里打开后再更新。"
-            case .notWritable(let dir): return "没有权限写入 \(dir)。请把 XiwoBoard 放到你有写入权限的文件夹（如「应用程序」）后再更新。"
+            case .translocated: return "讲课板正在只读的临时位置运行，也没有权限写入「应用程序」文件夹。请退出后在 Finder 里把它拖进「应用程序」，从那里打开后再更新。"
+            case .notWritable(let dir): return "没有权限写入 \(dir)。请把讲课板放到你有写入权限的文件夹（如「应用程序」）后再更新。"
             }
         }
     }
@@ -360,7 +360,7 @@ struct UpdateView: View {
             HStack(spacing: 14) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("XiwoBoard 更新").font(.title3.bold())
+                    Text("讲课板更新").font(.title3.bold())
                     Text("当前版本 \(updater.currentVersion)").foregroundStyle(.secondary)
                 }
             }
@@ -389,7 +389,7 @@ struct UpdateView: View {
                 Text("发现新版本 \(r.version)").font(.headline)
                 ReleaseNotes(text: r.notes)
                 if updater.movesToApplications {
-                    Text("XiwoBoard 现在在只读的临时位置运行（比如直接在「下载」里打开）。新版本会装进「应用程序」文件夹，以后请从那里打开。")
+                    Text("讲课板现在在只读的临时位置运行（比如直接在「下载」里打开）。新版本会装进「应用程序」文件夹，以后请从那里打开。")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -407,8 +407,8 @@ struct UpdateView: View {
         case .ready(let r):
             VStack(alignment: .leading, spacing: 10) {
                 Text(updater.movesToApplications
-                     ? "\(r.version) 已下载并校验，会装进「应用程序」文件夹。重新打开 XiwoBoard 即可完成更新。"
-                     : "\(r.version) 已下载并校验。重新打开 XiwoBoard 即可完成更新。")
+                     ? "\(r.version) 已下载并校验，会装进「应用程序」文件夹。重新打开讲课板即可完成更新。"
+                     : "\(r.version) 已下载并校验。重新打开讲课板即可完成更新。")
                 Text("更新后，系统可能会再次请求录屏和麦克风权限。").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()

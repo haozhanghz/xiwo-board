@@ -78,7 +78,7 @@ struct HomeView: View {
                                                startPoint: .topLeading, endPoint: .bottomTrailing),
                                 in: RoundedRectangle(cornerRadius: 10))
                 VStack(alignment: .leading) {
-                    Text("XiwoBoard").font(.headline)
+                    Text("讲课板").font(.headline)
                     Text("课堂白板").font(.caption).foregroundStyle(.secondary)
                 }
             }
