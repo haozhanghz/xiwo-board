@@ -622,7 +622,7 @@ struct ChromeHandle: View {
         .background(Color(red: 0x26 / 255, green: 0x26 / 255, blue: 0x24 / 255).opacity(0.9), in: Capsule())
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.09)))
         .environment(\.colorScheme, .dark)
-        .opacity(0.75)
+        .opacity(0.9)
         .padding(4)
         .fixedSize()
     }

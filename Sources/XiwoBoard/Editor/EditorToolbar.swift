@@ -92,7 +92,7 @@ struct EditorToolbar: View {
             .accessibilityLabel("返回首页")
             .padding(.leading, 78) // clear the traffic lights
 
-            Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 8)
+            Rectangle().fill(Theme.divider).frame(width: 1, height: 16).padding(.horizontal, 8)
 
             TextField("课件名称", text: Binding(get: { doc.pendingTitle ?? doc.title }, set: { doc.pendingTitle = $0 }))
                 .textFieldStyle(.plain)
@@ -189,7 +189,7 @@ struct EditorToolbar: View {
         .fixedSize()
     }
 
-    private var divider: some View { Rectangle().fill(Theme.line).frame(width: 1, height: 22).padding(.horizontal, 6) }
+    private var divider: some View { Rectangle().fill(Theme.divider).frame(width: 1, height: 22).padding(.horizontal, 6) }
 
     private var isShapeTool: Bool {
         if case .shape = tools.tool { return true }
@@ -295,7 +295,7 @@ struct ColorSwatches: View {
                         .overlay(Circle().strokeBorder(Theme.line))
                         .frame(width: 18, height: 18)
                         .padding(2)
-                        .overlay(Circle().strokeBorder(selection == c ? Theme.text : .clear, lineWidth: 1.5))
+                        .overlay(Circle().strokeBorder(selection == c ? Theme.accent : .clear, lineWidth: 2))
                         .frame(minWidth: 24, minHeight: 24)
                         .contentShape(Rectangle())
                 }
@@ -310,7 +310,7 @@ struct ColorSwatches: View {
                     .overlay(Circle().fill(Color(nsColor: selection.nsColor)).frame(width: 9, height: 9))
                     .padding(2)
                     .overlay(Circle().strokeBorder(RGBA.penPalette.contains(selection) || palette.contains(selection)
-                                                   ? .clear : Theme.text, lineWidth: 1.5))
+                                                   ? .clear : Theme.accent, lineWidth: 2))
                     .allowsHitTesting(false)
                 ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
                                                    set: { selection = RGBA(NSColor($0)) }))

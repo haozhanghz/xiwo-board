@@ -47,6 +47,14 @@ enum Snapshotter {
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
                to: dir.appendingPathComponent("editor-inspector.png"))
         UserDefaults.standard.set(inspectorWasShown, forKey: "InspectorShown")
+        // Dark mode, with the app's appearance switched for the moment.
+        let appearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        render(HomeView().environmentObject(app).environmentObject(app.tools).environment(\.colorScheme, .dark),
+               size: CGSize(width: 1280, height: 800), to: dir.appendingPathComponent("home-dark.png"))
+        render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools).environment(\.colorScheme, .dark),
+               size: CGSize(width: 1440, height: 900), to: dir.appendingPathComponent("editor-dark.png"))
+        NSApp.appearance = appearance
         // The narrowest window the app allows, and a smaller one that needs icon-only tools.
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1000, height: 640),
                to: dir.appendingPathComponent("editor-1000.png"))

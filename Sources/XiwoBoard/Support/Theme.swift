@@ -14,11 +14,16 @@ enum Theme {
     static let backdrop = Color(nsBackdrop)
     static let nsBackdrop = nsDynamic(light: 0xE9E7DF, dark: 0x1A1918)
     /// Hairlines between panels and around cards.
-    static let line = dynamic(light: 0x141413, dark: 0xFAF9F5, alpha: 0.09)
+    static let line = ink.opacity(0.09)
+    /// The same line, solid, for straight dividers between panels (drawn as plain fills).
+    static let divider = dynamic(light: 0xE4E2DA, dark: 0x3A3936)
     /// Hover and pressed fills for quiet buttons.
-    static let hover = dynamic(light: 0x141413, dark: 0xFAF9F5, alpha: 0.06)
+    static let hover = ink.opacity(0.06)
     /// Selected rows and active tools.
-    static let selected = dynamic(light: 0x141413, dark: 0xFAF9F5, alpha: 0.09)
+    static let selected = ink.opacity(0.09)
+    /// Near-black in light mode, near-white in dark: the base of the translucent lines and fills.
+    /// Opaque here and faded with opacity(), since a dynamic colour's own alpha is not kept in dark mode.
+    private static let ink = dynamic(light: 0x141413, dark: 0xFAF9F5)
     static let text = dynamic(light: 0x141413, dark: 0xF5F4EF)
     static let secondaryText = dynamic(light: 0x73726C, dark: 0xA6A39A)
     static let tertiaryText = dynamic(light: 0x9C9A92, dark: 0x7A786F)
@@ -161,6 +166,7 @@ struct IconGroup<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 0) { content() }
+            .frame(maxWidth: .infinity)
             .padding(2)
             .background(Theme.hover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }

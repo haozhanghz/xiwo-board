@@ -61,7 +61,7 @@ struct Hairline: View {
     var vertical = false
 
     var body: some View {
-        Rectangle().fill(Theme.line)
+        Rectangle().fill(Theme.divider)
             .frame(width: vertical ? 1 : nil, height: vertical ? nil : 1)
     }
 }

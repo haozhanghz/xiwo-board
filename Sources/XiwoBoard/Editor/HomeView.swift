@@ -10,7 +10,7 @@ struct HomeView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-            Rectangle().fill(Theme.line).frame(width: 1)
+            Hairline(vertical: true)
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
                     Text("今天讲什么课？")
@@ -48,7 +48,7 @@ struct HomeView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(recent.prefix(8).enumerated()), id: \.element) { i, url in
-                        if i > 0 { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 54).padding(.trailing, 8) }
+                        if i > 0 { Hairline().padding(.leading, 54).padding(.trailing, 8) }
                         RecentFileRow(url: url, modified: modified(url)) { app.open(url) }
                             .contextMenu {
                                 Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -156,8 +156,6 @@ private struct RecentFileRow: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 16)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.tertiaryText)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
             .contentShape(Rectangle())
