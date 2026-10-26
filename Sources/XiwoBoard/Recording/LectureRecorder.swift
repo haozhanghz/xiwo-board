@@ -410,7 +410,8 @@ final class LectureRecorder: NSObject, ObservableObject {
         return first.deletingLastPathComponent().appendingPathComponent("\(name) 片段\(number).\(first.pathExtension)")
     }
 
-    static func makeOutputURL(title: String) -> URL {
+    /// 「影片 › 讲课板录课」, where every lecture is saved.
+    nonisolated static var recordingsDirectory: URL {
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
         let dir = movies.appendingPathComponent("讲课板录课", isDirectory: true)
@@ -419,6 +420,11 @@ final class LectureRecorder: NSObject, ObservableObject {
         if !FileManager.default.fileExists(atPath: dir.path), FileManager.default.fileExists(atPath: old.path) {
             try? FileManager.default.moveItem(at: old, to: dir)
         }
+        return dir
+    }
+
+    static func makeOutputURL(title: String) -> URL {
+        let dir = recordingsDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
