@@ -17,41 +17,93 @@ extension EnvironmentValues {
     }
 }
 
+private struct RibbonSelectionKey: EnvironmentKey {
+    static let defaultValue: Namespace.ID? = nil
+}
+
+extension EnvironmentValues {
+    /// Where a toolbar keeps the pill behind its chosen tool, so the pill slides from tool to tool.
+    var ribbonSelection: Namespace.ID? {
+        get { self[RibbonSelectionKey.self] }
+        set { self[RibbonSelectionKey.self] = newValue }
+    }
+}
+
+/// One toolbar's tools: one namespace for the chosen tool's pill and one gliding hover highlight.
+/// Each layout the toolbar tries gets its own, so the copies never share a pill.
+struct RibbonRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @Namespace private var selection
+
+    var body: some View {
+        FluidHoverGroup(axis: .x, content: content)
+            .environment(\.ribbonSelection, selection)
+    }
+}
+
 /// Big icon-over-label button used by the editor ribbon and presenter bar.
 struct RibbonButton: View {
     let title: String
     let systemImage: String
     var active = false
+    /// The active state is the toolbar's one chosen tool, whose pill slides over from the last tool.
+    var glides = false
     var tint: Color? = nil
     /// What VoiceOver says, when the title alone does not tell what the button does.
     var label: String? = nil
+    /// Names the button in its hover group when its title changes, like a ticking time.
+    var hoverID: String? = nil
     let action: () -> Void
     @Environment(\.ribbonDensity) private var density
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.fluidHover) private var group
+    @Environment(\.ribbonSelection) private var selectionSpace
+    @State private var hovering = false
 
     /// Labels sit a step quieter than icons, so the row reads as a row of icons.
     private var labelColor: Color { colorScheme == .dark ? Color.white.opacity(0.7) : Theme.secondaryText }
+    private var id: String { hoverID ?? title }
+    private var lit: Bool { group.map { $0.lit == AnyHashable(id) } ?? hovering }
+    /// The pointer is on another tool, so the chosen tool's pill steps back a little.
+    private var dimmed: Bool { group.map { $0.lit != nil && $0.lit != AnyHashable(id) } ?? false }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 2) {
-                Image(systemName: systemImage).font(.system(size: 16, weight: .regular)).frame(height: 20)
+                // Icons thicken under the pointer instead of the label changing.
+                Image(systemName: systemImage).font(.system(size: 16, weight: lit ? .medium : .regular)).frame(height: 20)
                 if density != .iconOnly {
                     // Even-width digits, so a ticking time does not change the button's width.
-                    Text(title).font(.system(size: 11.5).monospacedDigit()).fixedSize()
+                    WeightHeldText(title, bold: active)
+                        .font(.system(size: 11.5).monospacedDigit()).fixedSize()
                         .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(tint ?? labelColor))
                 }
             }
             .frame(minWidth: density == .regular ? 48 : 34, minHeight: density == .iconOnly ? 32 : 0)
             .padding(.vertical, 4).padding(.horizontal, density == .regular ? 4 : 2)
             .foregroundStyle(active ? Theme.accent : (tint ?? Theme.text))
-            .background(active ? Theme.accent.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background { activePill }
             .contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle())
+        .onHover { hovering = $0 }
+        .fluidHoverItem(id, action: action)
+        .animation(Motion.tint, value: lit)
+        .animation(Motion.fast, value: dimmed)
         .help(title)
         .accessibilityLabel(label ?? title)
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    @ViewBuilder private var activePill: some View {
+        if active {
+            let pill = RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.accent.opacity(0.13))
+            if glides, let selectionSpace {
+                pill.matchedGeometryEffect(id: "chosen-tool", in: selectionSpace).opacity(dimmed ? 0.85 : 1)
+            } else {
+                pill.opacity(dimmed ? 0.85 : 1)
+            }
+        }
     }
 }
 
@@ -60,12 +112,13 @@ struct RibbonPopoverButton<Content: View>: View {
     let title: String
     let systemImage: String
     var active = false
+    var glides = false
     var onTap: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
     @State private var shown = false
 
     var body: some View {
-        RibbonButton(title: title, systemImage: systemImage, active: active) {
+        RibbonButton(title: title, systemImage: systemImage, active: active, glides: glides) {
             if let onTap, !active { onTap() } else { shown.toggle() }
         }
         .popover(isPresented: $shown, arrowEdge: .bottom) {
@@ -169,42 +222,48 @@ struct EditorToolbar: View {
     }
 
     private var toolButtons: some View {
-        HStack(spacing: 4) {
-            RibbonButton(title: "撤销", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
-            RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
-            divider
-            RibbonButton(title: "新建页面", systemImage: "plus.rectangle") { doc.addSlide() }
-            RibbonButton(title: "选择", systemImage: "cursorarrow", active: tools.tool == .select) { tools.tool = .select }
-            RibbonPopoverButton(title: "画笔", systemImage: "pencil.tip", active: tools.tool == .pen,
-                                onTap: { tools.tool = .pen }) { PenSettings() }
-            RibbonPopoverButton(title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser,
-                                onTap: { tools.tool = .eraser }) { EraserSettings(doc: doc) }
-            divider
-            if insertToolsShown {
-                RibbonButton(title: "文本", systemImage: "character.textbox", active: tools.tool == .text) { tools.tool = .text }
-                RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: isShapeTool) {
-                    ShapePicker { tools.tool = .shape($0) }
+        RibbonRow {
+            HStack(spacing: 4) {
+                RibbonButton(title: "撤销", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
+                RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
+                divider
+                RibbonButton(title: "新建页面", systemImage: "plus.rectangle") { doc.addSlide() }
+                RibbonButton(title: "选择", systemImage: "cursorarrow", active: tools.tool == .select, glides: true) { tools.tool = .select }
+                RibbonPopoverButton(title: "画笔", systemImage: "pencil.tip", active: tools.tool == .pen, glides: true,
+                                    onTap: { tools.tool = .pen }) { PenSettings() }
+                RibbonPopoverButton(title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser, glides: true,
+                                    onTap: { tools.tool = .eraser }) { EraserSettings(doc: doc) }
+                divider
+                if insertToolsShown {
+                    Group {
+                        RibbonButton(title: "文本", systemImage: "character.textbox", active: tools.tool == .text, glides: true) { tools.tool = .text }
+                        RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: isShapeTool, glides: true) {
+                            ShapePicker { tools.tool = .shape($0) }
+                        }
+                        RibbonButton(title: "图片", systemImage: "photo") { Exporter.insertImages(into: doc) }
+                        RibbonButton(title: "音视频", systemImage: "film") { Exporter.insertMedia(into: doc) }
+                        RibbonPopoverButton(title: "表格", systemImage: "tablecells") { TablePicker { r, c in doc.insertTable(rows: r, columns: c) } }
+                        RibbonPopoverButton(title: "学科工具", systemImage: "function") { SubjectTools(doc: doc) }
+                        RibbonButton(title: "蒙层", systemImage: "rectangle.dashed.badge.record",
+                                     active: !doc.selectedElements.isEmpty && doc.selectedElements.allSatisfy(\.masked)) {
+                            let all = doc.selectedElements.allSatisfy(\.masked)
+                            doc.updateSelected { $0.masked = !all }
+                        }
+                        .disabled(doc.selection.isEmpty)
+                    }
+                    .transition(.opacity)
                 }
-                RibbonButton(title: "图片", systemImage: "photo") { Exporter.insertImages(into: doc) }
-                RibbonButton(title: "音视频", systemImage: "film") { Exporter.insertMedia(into: doc) }
-                RibbonPopoverButton(title: "表格", systemImage: "tablecells") { TablePicker { r, c in doc.insertTable(rows: r, columns: c) } }
-                RibbonPopoverButton(title: "学科工具", systemImage: "function") { SubjectTools(doc: doc) }
-                RibbonButton(title: "蒙层", systemImage: "rectangle.dashed.badge.record",
-                             active: !doc.selectedElements.isEmpty && doc.selectedElements.allSatisfy(\.masked)) {
-                    let all = doc.selectedElements.allSatisfy(\.masked)
-                    doc.updateSelected { $0.masked = !all }
+                RibbonButton(title: insertToolsShown ? "收起" : "插入",
+                             systemImage: insertToolsShown ? "chevron.left" : "plus.square.on.square",
+                             label: insertToolsShown ? "收起插入工具" : "插入文本、形状、图片等", hoverID: "insert") {
+                    if insertToolsShown, tools.tool == .text || isShapeTool { tools.tool = .select }
+                    withAnimation(Motion.moderate) { insertToolsShown.toggle() }
                 }
-                .disabled(doc.selection.isEmpty)
+                .help(insertToolsShown ? "收起插入工具" : "文本、形状、图片、音视频、表格、学科工具、蒙层")
             }
-            RibbonButton(title: insertToolsShown ? "收起" : "插入",
-                         systemImage: insertToolsShown ? "chevron.left" : "plus.square.on.square",
-                         label: insertToolsShown ? "收起插入工具" : "插入文本、形状、图片等") {
-                if insertToolsShown, tools.tool == .text || isShapeTool { tools.tool = .select }
-                insertToolsShown.toggle()
-            }
-            .help(insertToolsShown ? "收起插入工具" : "文本、形状、图片、音视频、表格、学科工具、蒙层")
+            .fixedSize()
         }
-        .fixedSize()
+        .animation(Motion.moderate, value: tools.tool)
     }
 
     private var divider: some View { Rectangle().fill(Theme.divider).frame(width: 1, height: 22).padding(.horizontal, 6) }
@@ -245,7 +304,7 @@ struct PresentButton: View {
                     .frame(height: 30)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SplitSegmentStyle())
             .help("从当前页开始授课（⌘↩）")
             Rectangle().fill(.white.opacity(0.28)).frame(width: 1, height: 16)
             Menu {
@@ -256,14 +315,35 @@ struct PresentButton: View {
                     .frame(width: 26, height: 30).contentShape(Rectangle())
             }
             .menuStyle(.button)
-            .buttonStyle(.plain)
+            .buttonStyle(SplitSegmentStyle())
             .menuIndicator(.hidden)
             .fixedSize()
             .accessibilityLabel("授课选项")
         }
         .foregroundStyle(.white)
-        .background(Theme.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Theme.accent)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .fixedSize()
+    }
+
+    /// Each half of the split button darkens on its own under the pointer and more while pressed.
+    private struct SplitSegmentStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            SplitSegment(configuration: configuration)
+        }
+    }
+
+    private struct SplitSegment: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .background(.black.opacity(configuration.isPressed ? 0.16 : hovering ? 0.08 : 0))
+                .onHover { hovering = $0 }
+                .animation(Motion.tint, value: hovering)
+                .animation(configuration.isPressed ? Motion.press : Motion.release, value: configuration.isPressed)
+        }
     }
 
     private struct PresentLabelStyle: LabelStyle {
@@ -280,6 +360,7 @@ struct PresentButton: View {
 
 struct PenSettings: View {
     @EnvironmentObject var tools: ToolState
+    @Namespace private var widthSpace
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -301,7 +382,11 @@ struct PenSettings: View {
                     Button { tools.penWidth = tools.penKind == .highlighter ? w * 3 : w } label: {
                         Circle().fill(Color.primary).frame(width: dotSize(w), height: dotSize(w))
                             .frame(width: 32, height: 32)
-                            .background(isWidth(w) ? Theme.accent.opacity(0.18) : .clear, in: Circle())
+                            .background {
+                                if isWidth(w) {
+                                    Circle().fill(Theme.accent.opacity(0.18)).matchedGeometryEffect(id: "width", in: widthSpace)
+                                }
+                            }
                             // The whole cell takes the click, not just the dot: a thin pen's dot is a few points wide.
                             .frame(maxWidth: .infinity, minHeight: 36)
                             .contentShape(Rectangle())
@@ -311,6 +396,7 @@ struct PenSettings: View {
                     .accessibilityAddTraits(isWidth(w) ? .isSelected : [])
                 }
             }
+            .animation(Motion.moderate, value: tools.penWidth)
             ColorSwatches(selection: $tools.penColor)
         }
         .frame(width: 250)
@@ -327,6 +413,7 @@ struct PenSettings: View {
 struct ColorSwatches: View {
     @Binding var selection: RGBA
     var palette: [RGBA] = RGBA.penPalette
+    @Namespace private var ring
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 24), spacing: 2)], alignment: .leading, spacing: 4) {
@@ -336,7 +423,7 @@ struct ColorSwatches: View {
                         .overlay(Circle().strokeBorder(Theme.line))
                         .frame(width: 18, height: 18)
                         .padding(2)
-                        .overlay(Circle().strokeBorder(selection == c ? Theme.accent : .clear, lineWidth: 2))
+                        .overlay { if selection == c { SelectionRing(namespace: ring) } }
                         .frame(minWidth: 24, minHeight: 24)
                         .contentShape(Rectangle())
                 }
@@ -350,8 +437,9 @@ struct ColorSwatches: View {
                     .frame(width: 18, height: 18)
                     .overlay(Circle().fill(Color(nsColor: selection.nsColor)).frame(width: 9, height: 9))
                     .padding(2)
-                    .overlay(Circle().strokeBorder(RGBA.penPalette.contains(selection) || palette.contains(selection)
-                                                   ? .clear : Theme.accent, lineWidth: 2))
+                    .overlay {
+                        if !RGBA.penPalette.contains(selection) && !palette.contains(selection) { SelectionRing(namespace: ring) }
+                    }
                     .allowsHitTesting(false)
                 ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
                                                    set: { selection = RGBA(NSColor($0)) }))
@@ -363,12 +451,23 @@ struct ColorSwatches: View {
             .frame(minWidth: 24, minHeight: 24)
             .help("自定义颜色")
         }
+        .animation(Motion.moderate, value: selection)
     }
 
     private func colorName(_ color: RGBA) -> String {
         let names = ["黑色", "白色", "红色", "橙色", "黄色", "绿色", "蓝色", "紫色"]
         if let index = RGBA.penPalette.firstIndex(of: color) { return names[index] }
         return "颜色 \(color.argbHex)"
+    }
+}
+
+/// The accent ring around the chosen swatch. One per group of swatches, so it slides to the next pick.
+struct SelectionRing: View {
+    let namespace: Namespace.ID
+
+    var body: some View {
+        Circle().strokeBorder(Theme.accent, lineWidth: 2)
+            .matchedGeometryEffect(id: "ring", in: namespace)
     }
 }
 

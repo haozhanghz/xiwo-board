@@ -37,6 +37,12 @@ enum Snapshotter {
         UserDefaults.standard.set(samples.map(\.path), forKey: "recentFiles")
         render(HomeView().environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1280, height: 800),
                to: dir.appendingPathComponent("home-recents.png"))
+        // The pointer on the second recent file: the list's one highlight sits there, its hairlines gone.
+        if RecentFiles.urls.count > 1 {
+            render(HomeView().environmentObject(app).environmentObject(app.tools)
+                    .environment(\.fluidHoverPreview, AnyHashable(RecentFiles.urls[1])),
+                   size: CGSize(width: 1280, height: 800), to: dir.appendingPathComponent("home-hover.png"))
+        }
         UserDefaults.standard.set(savedRecent, forKey: "recentFiles")
         for url in samples { try? FileManager.default.removeItem(at: url) }
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
@@ -71,12 +77,18 @@ enum Snapshotter {
                to: dir.appendingPathComponent("editor-1000.png"))
         render(EditorToolbar(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 820, height: 60),
                to: dir.appendingPathComponent("toolbar-820.png"))
+        // The pointer on 画笔 while 选择 is the chosen tool.
+        render(EditorToolbar(doc: doc).environmentObject(app).environmentObject(app.tools).environment(\.fluidHoverPreview, "画笔"),
+               size: CGSize(width: 1440, height: 52), to: dir.appendingPathComponent("toolbar-hover.png"))
 
         let presenter = PresentationController(document: doc, tools: app.tools, recorder: app.recorder)
         render(PresentationToolbar(presenter: presenter, maxWidth: 1900).environmentObject(app.tools).environmentObject(app.recorder),
                size: nil, to: dir.appendingPathComponent("present-toolbar.png"))
         render(PresentationToolbar(presenter: presenter, maxWidth: 1000).environmentObject(app.tools).environmentObject(app.recorder),
                size: nil, to: dir.appendingPathComponent("present-toolbar-1000.png"))
+        render(PresentationToolbar(presenter: presenter, maxWidth: 1900).environmentObject(app.tools).environmentObject(app.recorder)
+                .environment(\.fluidHoverPreview, "激光笔"),
+               size: nil, to: dir.appendingPathComponent("present-toolbar-hover.png"))
         // While recording, and while paused, the toolbar and the handle carry a pause button.
         for (state, name) in [(LectureRecorder.State.recording, "recording"), (.paused, "paused")] {
             app.recorder.preview(state, elapsed: 754)

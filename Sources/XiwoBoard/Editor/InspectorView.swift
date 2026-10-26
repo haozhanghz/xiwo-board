@@ -49,6 +49,7 @@ struct BackgroundSwatches: View {
     let apply: (SlideBackground) -> Void
 
     private static let boards = SlideBackground.presets.filter { $0.background.pattern == .none }
+    @Namespace private var ring
 
     var body: some View {
         HStack(spacing: 4) {
@@ -59,7 +60,7 @@ struct BackgroundSwatches: View {
                         .overlay(Circle().strokeBorder(Theme.line))
                         .frame(width: 22, height: 22)
                         .padding(2)
-                        .overlay(Circle().strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2))
+                        .overlay { if selected { SelectionRing(namespace: ring) } }
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -73,7 +74,7 @@ struct BackgroundSwatches: View {
                     .frame(width: 22, height: 22)
                     .overlay(Circle().fill(Color(nsColor: background.color.nsColor)).frame(width: 11, height: 11))
                     .padding(2)
-                    .overlay(Circle().strokeBorder(custom ? Theme.accent : .clear, lineWidth: 2))
+                    .overlay { if custom { SelectionRing(namespace: ring) } }
                     .allowsHitTesting(false)
                 ColorPicker("自定义背景颜色", selection: Binding(get: { Color(nsColor: background.color.nsColor) },
                                                          set: { c in var b = background; b.color = RGBA(NSColor(c)); apply(b) }))
@@ -85,6 +86,7 @@ struct BackgroundSwatches: View {
             .help("其他颜色")
             Spacer(minLength: 0)
         }
+        .animation(Motion.moderate, value: background.color)
     }
 }
 
@@ -162,19 +164,6 @@ struct ValueSlider: View {
 }
 
 /// A setting row: label on the left, a small switch on the right.
-struct SettingToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack {
-            configuration.label
-            Spacer(minLength: 8)
-            Toggle("", isOn: configuration.$isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-        }
-    }
-}
-
 /// A labelled row in the property panel: fixed-width caption, then the control.
 struct InspectorRow<Content: View>: View {
     let label: String
@@ -333,6 +322,7 @@ struct ElementInspector: View {
                 .frame(maxWidth: .infinity, minHeight: 28).contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle(cornerRadius: 6)).help(help).accessibilityLabel(help)
+        .fluidHoverItem(help, action: action)
     }
 
     @ViewBuilder private var geometry: some View {
@@ -442,7 +432,7 @@ struct NumberField: View {
     var body: some View {
         // The caption sits inside the field, so every field in the grid lines up.
         HStack(spacing: 6) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.tertiaryText).fixedSize()
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondaryText).fixedSize()
             TextField("", text: $text, onCommit: {
                 if let v = Double(text), v.isFinite { commit(v) }
                 text = format(value)

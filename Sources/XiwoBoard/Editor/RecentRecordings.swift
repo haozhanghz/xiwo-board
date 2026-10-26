@@ -47,8 +47,11 @@ struct RecentRecordingsSection: View {
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 16)], alignment: .leading, spacing: 20) {
-                    ForEach(recordings) { RecordingCard(file: $0, onChange: reload) }
+                // One highlight glides from card to card; a click within 16 points of the lit card plays it.
+                FluidHoverGroup(axis: .xy, cornerRadius: 16, outset: 8, gapClickReach: 16) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 16)], alignment: .leading, spacing: 20) {
+                        ForEach(recordings) { RecordingCard(file: $0, onChange: reload) }
+                    }
                 }
             }
         }
@@ -72,6 +75,10 @@ private struct RecordingCard: View {
     @State private var duration: TimeInterval?
 
     @State private var hovering = false
+    @Environment(\.fluidHover) private var group
+
+    /// Lit in the card grid, or under the pointer outside one: shows the play and share buttons.
+    private var lit: Bool { group.map { $0.lit == AnyHashable(file.url) } ?? hovering }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -90,7 +97,7 @@ private struct RecordingCard: View {
                                 .foregroundStyle(.white)
                                 .frame(width: 38, height: 38)
                                 .background(.black.opacity(0.45), in: Circle())
-                                .opacity(hovering || poster == nil ? 1 : 0)
+                                .opacity(lit || poster == nil ? 1 : 0)
                         }
                     if let duration {
                         Text(LectureRecorder.format(duration))
@@ -109,7 +116,7 @@ private struct RecordingCard: View {
             .help("播放")
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(file.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(file.title).font(.system(size: 14)).foregroundStyle(Theme.text).lineLimit(1)
                     Text("\(file.modified.formatted(.dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN")))) · \(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
                         .font(.system(size: 12.5)).foregroundStyle(Theme.secondaryText).lineLimit(1)
                 }
@@ -119,13 +126,15 @@ private struct RecordingCard: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
                 .buttonStyle(.borderless)
-                .opacity(hovering ? 1 : 0)
+                .opacity(lit ? 1 : 0)
                 .help("分享")
                 .accessibilityLabel("分享 \(file.name)")
             }
             .padding(.horizontal, 2)
         }
         .onHover { hovering = $0 }
+        .animation(Motion.fast, value: lit)
+        .fluidHoverItem(file.url) { NSWorkspace.shared.open(file.url) }
         .contextMenu {
             Button("播放") { NSWorkspace.shared.open(file.url) }
             Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
