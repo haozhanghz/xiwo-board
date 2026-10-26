@@ -38,7 +38,7 @@ struct HomeView: View {
             if recent.isEmpty {
                 VStack(spacing: 12) {
                     Text("打开过的课件会出现在这里，也可以打开 .enbx 课件")
-                        .font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
+                        .font(.system(size: 13)).foregroundStyle(Theme.secondaryText)
                     Button { app.openWithPanel() } label: { Text("打开课件…") }
                         .buttonStyle(SecondaryButtonStyle())
                 }
@@ -70,7 +70,7 @@ struct HomeView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .frame(width: 30, height: 30)
-                Text("讲课板").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
+                Text("录课").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
             }
             .padding(.horizontal, 10)
             .padding(.top, 44) // clear the traffic lights
@@ -78,11 +78,11 @@ struct HomeView: View {
             Button { app.newDocument() } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 20, height: 20)
                         .background(Theme.accent, in: Circle())
-                    Text("新建课件").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text)
+                    Text("新建课件").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 9).frame(height: 34)
@@ -101,12 +101,12 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.secondaryText)
             }
-            .font(.system(size: 11.5))
+            .font(.system(size: 12.5))
             .foregroundStyle(Theme.tertiaryText)
             .padding(.horizontal, 10)
         }
         .padding(.horizontal, 10).padding(.bottom, 16)
-        .frame(width: 232)
+        .frame(width: 244)
         .background(Theme.sidebar)
     }
 
@@ -123,11 +123,11 @@ struct SectionHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.secondaryText)
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.secondaryText)
             Spacer()
             trailing()
                 .buttonStyle(.plain)
-                .font(.system(size: 12))
+                .font(.system(size: 13))
                 .foregroundStyle(Theme.secondaryText)
         }
         .padding(.horizontal, 4)
@@ -143,16 +143,16 @@ private struct RecentFileRow: View {
         Button(action: open) {
             HStack(spacing: 12) {
                 Image(systemName: url.pathExtension.lowercased() == "enbx" ? "doc.richtext" : "rectangle.on.rectangle")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 30, height: 30)
                     .background(Theme.hover, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(url.deletingPathExtension().lastPathComponent)
-                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text)
+                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text)
                         .lineLimit(1)
                     Text([url.deletingLastPathComponent().lastPathComponent, modified].filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondaryText)
+                        .font(.system(size: 12.5)).foregroundStyle(Theme.secondaryText)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 16)

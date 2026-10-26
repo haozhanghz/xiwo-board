@@ -38,11 +38,11 @@ struct RibbonButton: View {
                 Image(systemName: systemImage).font(.system(size: 16, weight: .regular)).frame(height: 20)
                 if density != .iconOnly {
                     // Even-width digits, so a ticking time does not change the button's width.
-                    Text(title).font(.system(size: 10.5).monospacedDigit()).fixedSize()
+                    Text(title).font(.system(size: 11.5).monospacedDigit()).fixedSize()
                         .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(tint ?? labelColor))
                 }
             }
-            .frame(minWidth: density == .regular ? 44 : 32, minHeight: density == .iconOnly ? 32 : 0)
+            .frame(minWidth: density == .regular ? 48 : 34, minHeight: density == .iconOnly ? 32 : 0)
             .padding(.vertical, 4).padding(.horizontal, density == .regular ? 4 : 2)
             .foregroundStyle(active ? Theme.accent : (tint ?? Theme.text))
             .background(active ? Theme.accent.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -84,7 +84,7 @@ struct EditorToolbar: View {
     var body: some View {
         HStack(spacing: 2) {
             Button { app.closeDocument() } label: {
-                Image(systemName: "house").font(.system(size: 14)).foregroundStyle(Theme.secondaryText)
+                Image(systemName: "house").font(.system(size: 15)).foregroundStyle(Theme.secondaryText)
                     .frame(width: 30, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(QuietButtonStyle())
@@ -96,7 +96,7 @@ struct EditorToolbar: View {
 
             TextField("课件名称", text: Binding(get: { doc.pendingTitle ?? doc.title }, set: { doc.pendingTitle = $0 }))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Theme.text)
                 .frame(width: min(160, max(60, CGFloat((doc.pendingTitle ?? doc.title).count) * 13.5 + 4)))
                 .lineLimit(1)
@@ -142,7 +142,7 @@ struct EditorToolbar: View {
             .padding(.trailing, 8)
 
             Button { inspectorShown.toggle() } label: {
-                Image(systemName: "sidebar.right").font(.system(size: 15))
+                Image(systemName: "sidebar.right").font(.system(size: 16))
                     .foregroundStyle(inspectorShown ? Theme.text : Theme.secondaryText)
                     .frame(width: 32, height: 28).contentShape(Rectangle())
             }
@@ -160,7 +160,7 @@ struct EditorToolbar: View {
     }
 
     private var toolButtons: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             RibbonButton(title: "撤销", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
             RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
             divider
@@ -235,7 +235,7 @@ struct PresentButton: View {
         func makeBody(configuration: Configuration) -> some View {
             HStack(spacing: 6) {
                 configuration.icon.font(.system(size: 10))
-                configuration.title.font(.system(size: 13, weight: .semibold))
+                configuration.title.font(.system(size: 14, weight: .semibold))
             }
         }
     }
@@ -345,11 +345,11 @@ struct EraserSettings: View {
         VStack(alignment: .leading, spacing: 12) {
             PillPicker(selection: $tools.eraserMode, options: EraserMode.allCases.map { ($0, $0.label) })
             HStack(spacing: 10) {
-                Text("大小").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("大小").font(.system(size: 13)).foregroundStyle(.secondary)
                 Slider(value: $tools.eraserSize, in: 10...160).controlSize(.small)
             }
             Button(role: .destructive) { doc.clearInk() } label: {
-                Label("清除本页笔迹", systemImage: "trash").font(.system(size: 12))
+                Label("清除本页笔迹", systemImage: "trash").font(.system(size: 13))
                     .foregroundStyle(Color(red: 0.86, green: 0.3, blue: 0.26))
             }
             .buttonStyle(.plain)

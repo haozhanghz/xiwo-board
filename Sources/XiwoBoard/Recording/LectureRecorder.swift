@@ -391,8 +391,8 @@ final class LectureRecorder: NSObject, ObservableObject {
         if firstTime { return false }
         let a = NSAlert()
         a.messageText = "需要「录屏与系统录音」权限"
-        a.informativeText = "请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中打开讲课板，然后退出并重新打开讲课板，再开始录制。"
-            + "如果那里的讲课板已经打开了（从旧版本更新后会这样），先选中它点「−」删掉，再退出并重新打开讲课板，开始录制时重新允许。"
+        a.informativeText = "请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中打开「录课」，然后退出并重新打开「录课」，再开始录制。"
+            + "如果那里的「录课」已经打开了（从旧版本更新后会这样），先选中它点「−」删掉，再退出并重新打开「录课」，开始录制时重新允许。"
         a.addButton(withTitle: "打开系统设置")
         a.addButton(withTitle: "取消")
         if a.runModal() == .alertFirstButtonReturn { openPrivacySettings("Privacy_ScreenCapture") }
@@ -410,7 +410,7 @@ final class LectureRecorder: NSObject, ObservableObject {
         if status == .authorized { return true }
         let a = NSAlert()
         a.messageText = "无法使用麦克风"
-        a.informativeText = "讲课板没有麦克风权限。可以先不录声音，或者在「系统设置 › 隐私与安全性 › 麦克风」中打开讲课板。"
+        a.informativeText = "「录课」没有麦克风权限。可以先不录声音，或者在「系统设置 › 隐私与安全性 › 麦克风」中打开「录课」。"
         a.addButton(withTitle: "不录声音，继续")
         a.addButton(withTitle: "打开系统设置")
         a.addButton(withTitle: "取消")
@@ -438,15 +438,17 @@ final class LectureRecorder: NSObject, ObservableObject {
         return first.deletingLastPathComponent().appendingPathComponent("\(name) 片段\(number).\(first.pathExtension)")
     }
 
-    /// 「影片 › 讲课板录课」, where every lecture is saved.
+    /// 「影片 › 录课」, where every lecture is saved.
     nonisolated static var recordingsDirectory: URL {
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = movies.appendingPathComponent("讲课板录课", isDirectory: true)
-        // Recordings made before the app was renamed move along with it.
-        let old = movies.appendingPathComponent("XiwoBoard 录课", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path), FileManager.default.fileExists(atPath: old.path) {
-            try? FileManager.default.moveItem(at: old, to: dir)
+        let dir = movies.appendingPathComponent("录课", isDirectory: true)
+        // Recordings made under the app's earlier names move along with it.
+        for name in ["讲课板录课", "XiwoBoard 录课"] {
+            let old = movies.appendingPathComponent(name, isDirectory: true)
+            if !FileManager.default.fileExists(atPath: dir.path), FileManager.default.fileExists(atPath: old.path) {
+                try? FileManager.default.moveItem(at: old, to: dir)
+            }
         }
         return dir
     }
@@ -464,7 +466,7 @@ final class LectureRecorder: NSObject, ObservableObject {
         let a = NSAlert()
         a.messageText = "录制失败"
         a.informativeText = error.localizedDescription
-            + "\n\n如果是首次录制，请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中允许讲课板，然后重新打开应用。"
+            + "\n\n如果是首次录制，请在「系统设置 › 隐私与安全性 › 录屏与系统录音」中允许「录课」，然后重新打开应用。"
         a.runModal()
     }
 
@@ -477,7 +479,7 @@ final class LectureRecorder: NSObject, ObservableObject {
             case .finishTimedOut: return "录制文件未能及时保存完成，请检查磁盘空间后重试。"
             case .finishedBeforeStart: return "录制意外结束，请重新开始录制。"
             case .partsKept(let n, let error):
-                return "暂停前后录下的 \(n) 段视频没能合成一个文件（\(error.localizedDescription)），各段已分别保存在「影片 › 讲课板录课」里。"
+                return "暂停前后录下的 \(n) 段视频没能合成一个文件（\(error.localizedDescription)），各段已分别保存在「影片 › 录课」里。"
             }
         }
     }

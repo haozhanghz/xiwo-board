@@ -17,9 +17,9 @@ struct InspectorView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 18)
-            .frame(width: 264, alignment: .leading)
+            .frame(width: 280, alignment: .leading)
         }
-        .font(.system(size: 12))
+        .font(.system(size: 13))
         .foregroundStyle(Theme.text)
         .controlSize(.small)
         .toggleStyle(SettingToggleStyle())
@@ -36,9 +36,82 @@ struct InspectorSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !first { Hairline().padding(.bottom, 8) }
-            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.secondaryText)
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.secondaryText)
             content()
         }
+    }
+}
+
+/// Page colours: the board colours as dots, then any other colour from the system panel.
+/// Picking a board keeps the current writing grid and gives its lines a colour that shows on it.
+struct BackgroundSwatches: View {
+    let background: SlideBackground
+    let apply: (SlideBackground) -> Void
+
+    private static let boards = SlideBackground.presets.filter { $0.background.pattern == .none }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.boards, id: \.name) { name, preset in
+                let selected = background.color == preset.color
+                Button { apply(background.with(board: preset)) } label: {
+                    Circle().fill(Color(nsColor: preset.color.nsColor))
+                        .overlay(Circle().strokeBorder(Theme.line))
+                        .frame(width: 22, height: 22)
+                        .padding(2)
+                        .overlay(Circle().strokeBorder(selected ? Theme.accent : .clear, lineWidth: 2))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(name)
+                .accessibilityLabel("背景：\(name)")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            ZStack {
+                let custom = !Self.boards.contains { $0.background.color == background.color }
+                Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+                    .frame(width: 22, height: 22)
+                    .overlay(Circle().fill(Color(nsColor: background.color.nsColor)).frame(width: 11, height: 11))
+                    .padding(2)
+                    .overlay(Circle().strokeBorder(custom ? Theme.accent : .clear, lineWidth: 2))
+                    .allowsHitTesting(false)
+                ColorPicker("自定义背景颜色", selection: Binding(get: { Color(nsColor: background.color.nsColor) },
+                                                         set: { c in var b = background; b.color = RGBA(NSColor(c)); apply(b) }))
+                    .labelsHidden()
+                    .opacity(0.02)
+                    .frame(width: 26, height: 26)
+                    .clipShape(Circle())
+            }
+            .help("其他颜色")
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+extension SlideBackground {
+    private var isDark: Bool { 0.299 * color.r + 0.587 * color.g + 0.114 * color.b < 0.5 }
+
+    /// The same page on another board colour; grid lines take a colour that shows on it.
+    func with(board preset: SlideBackground) -> SlideBackground {
+        var b = self
+        b.color = preset.color
+        if preset.isDark {
+            b.patternColor = preset.patternColor
+        } else if isDark {
+            b.patternColor = SlideBackground().patternColor
+            b = b.with(pattern: pattern)
+        }
+        return b
+    }
+
+    /// The same page with another writing grid, its lines coloured as the matching preset on a light page.
+    func with(pattern: BackgroundPattern) -> SlideBackground {
+        var b = self
+        b.pattern = pattern
+        if !isDark, let preset = SlideBackground.presets.first(where: { $0.background.pattern == pattern && !$0.background.isDark }) {
+            b.patternColor = preset.background.patternColor
+        }
+        return b
     }
 }
 
@@ -61,8 +134,8 @@ struct MenuField<Value: Hashable>: View {
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.secondaryText)
             }
-            .font(.system(size: 12))
-            .padding(.horizontal, 8).frame(height: 26)
+            .font(.system(size: 13))
+            .padding(.horizontal, 8).frame(height: 28)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
             .contentShape(Rectangle())
@@ -82,7 +155,7 @@ struct ValueSlider: View {
     var body: some View {
         HStack(spacing: 8) {
             Slider(value: $value, in: range)
-            Text(format(value)).font(.system(size: 11).monospacedDigit()).foregroundStyle(Theme.secondaryText)
+            Text(format(value)).font(.system(size: 12).monospacedDigit()).foregroundStyle(Theme.secondaryText)
                 .frame(width: 34, alignment: .trailing)
         }
     }
@@ -109,7 +182,7 @@ struct InspectorRow<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(label).foregroundStyle(Theme.text).frame(width: 44, alignment: .leading)
+            Text(label).foregroundStyle(Theme.text).frame(width: 48, alignment: .leading)
             content()
         }
     }
@@ -121,46 +194,30 @@ struct PageInspector: View {
     var body: some View {
         let bg = doc.slide.background
         InspectorSection(title: "页面背景", first: true) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
-                ForEach(SlideBackground.presets, id: \.name) { name, preset in
-                    Button { doc.editSlide { $0.background = preset } } label: {
-                        SlidePreview(slide: Slide(background: preset), courseware: doc.courseware, pixelWidth: 120)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Theme.line))
-                            .padding(2)
-                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .strokeBorder(bg == preset ? Theme.accent : .clear, lineWidth: 2))
-                    }
-                    .buttonStyle(.plain)
-                    .help(name)
-                    .accessibilityLabel("背景：\(name)")
-                    .accessibilityAddTraits(bg == preset ? .isSelected : [])
-                }
-            }
             InspectorRow(label: "颜色") {
-                ColorPicker("背景颜色", selection: Binding(get: { Color(nsColor: bg.color.nsColor) },
-                                                        set: { c in doc.editSlide { $0.background.color = RGBA(NSColor(c)) } }))
-                    .labelsHidden()
-                Spacer()
+                BackgroundSwatches(background: bg) { new in doc.editSlide { $0.background = new } }
             }
             InspectorRow(label: "书写格") {
-                MenuField(selection: Binding(get: { bg.pattern }, set: { p in doc.editSlide { $0.background.pattern = p } }),
+                MenuField(selection: Binding(get: { bg.pattern }, set: { p in doc.editSlide { $0.background = bg.with(pattern: p) } }),
                           options: BackgroundPattern.allCases.map { ($0, $0.displayName) })
             }
-            HStack(spacing: 6) {
-                Button("背景图片…") {
+            HStack(spacing: 8) {
+                Button {
                     guard let url = Exporter.chooseFiles([.image], multiple: false).first, let data = try? Data(contentsOf: url) else { return }
                     doc.edit { cw in
                         let key = cw.addResource(data: data, name: url.lastPathComponent, ext: url.pathExtension)
                         cw.slides[doc.currentIndex].background.image = key
                     }
-                }
-                if bg.image != nil { Button("移除") { doc.editSlide { $0.background.image = nil } } }
-                Button("应用到全部页面") {
-                    doc.edit { cw in for i in cw.slides.indices { cw.slides[i].background = bg } }
+                } label: { Text(bg.image == nil ? "背景图片…" : "换图片…").frame(maxWidth: .infinity) }
+                if bg.image != nil {
+                    Button { doc.editSlide { $0.background.image = nil } } label: { Text("移除图片").frame(maxWidth: .infinity) }
                 }
             }
-            .buttonStyle(SecondaryButtonStyle(height: 26))
+            .buttonStyle(SecondaryButtonStyle(height: 28))
+            Button {
+                doc.edit { cw in for i in cw.slides.indices { cw.slides[i].background = bg } }
+            } label: { Text("应用到全部页面").frame(maxWidth: .infinity) }
+            .buttonStyle(SecondaryButtonStyle(height: 28))
         }
         InspectorSection(title: "翻页动画") {
             MenuField(selection: Binding(get: { doc.slide.transition }, set: { t in doc.editSlide { $0.transition = t } }),
@@ -183,7 +240,7 @@ struct NotesEditor: View {
     var body: some View {
         TextEditor(text: $text)
             .focused($focused)
-            .font(.system(size: 12))
+            .font(.system(size: 13))
             .scrollContentBackground(.hidden)
             .padding(6)
             .frame(height: 120)
@@ -244,8 +301,8 @@ struct ElementInspector: View {
                 Button { doc.ungroupSelection() } label: { Text("取消组合").frame(maxWidth: .infinity) }
                     .disabled(!elements.contains { if case .group = $0.content { return true } else { return false } })
             }
-            .buttonStyle(SecondaryButtonStyle(height: 26))
-            .font(.system(size: 12))
+            .buttonStyle(SecondaryButtonStyle(height: 28))
+            .font(.system(size: 13))
         }
         InspectorSection(title: "授课") {
             Toggle("锁定", isOn: flag(\.locked))
@@ -255,7 +312,7 @@ struct ElementInspector: View {
                 TextField("超链接（网址或 页面:3）", text: Binding(get: { first.hyperlink ?? "" },
                                                            set: { v in doc.update(first.id) { $0.hyperlink = v.isEmpty ? nil : v } }))
                     .textFieldStyle(.plain)
-                    .padding(.horizontal, 8).frame(height: 26)
+                    .padding(.horizontal, 8).frame(height: 28)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
             }
@@ -272,8 +329,8 @@ struct ElementInspector: View {
 
     private func iconButton(_ icon: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Theme.secondaryText)
-                .frame(maxWidth: .infinity, minHeight: 26).contentShape(Rectangle())
+            Image(systemName: icon).font(.system(size: 14)).foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity, minHeight: 28).contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle(cornerRadius: 6)).help(help).accessibilityLabel(help)
     }
@@ -385,16 +442,16 @@ struct NumberField: View {
     var body: some View {
         // The caption sits inside the field, so every field in the grid lines up.
         HStack(spacing: 6) {
-            Text(label).font(.system(size: 11)).foregroundStyle(Theme.tertiaryText).fixedSize()
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.tertiaryText).fixedSize()
             TextField("", text: $text, onCommit: {
                 if let v = Double(text), v.isFinite { commit(v) }
                 text = format(value)
             })
                 .textFieldStyle(.plain)
-                .font(.system(size: 12).monospacedDigit())
+                .font(.system(size: 13).monospacedDigit())
                 .accessibilityLabel(label)
         }
-        .padding(.horizontal, 8).frame(width: 110, height: 26)
+        .padding(.horizontal, 8).frame(width: 116, height: 28)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
         .onAppear { text = format(value) }

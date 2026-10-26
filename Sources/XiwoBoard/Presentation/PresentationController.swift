@@ -489,7 +489,7 @@ struct PresentationToolbar: View {
                 .disabled(doc.currentIndex == 0)
             Button { presenter.showPages.toggle() } label: {
                 Text("\(doc.currentIndex + 1) / \(doc.slideCount)")
-                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .font(.system(size: 15, weight: .medium).monospacedDigit())
                     .foregroundStyle(presenter.showPages ? Theme.accent : Color.white.opacity(0.85))
                     .frame(minWidth: 56, minHeight: 40)
                     .background(presenter.showPages ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -554,7 +554,7 @@ struct RecordingOptions: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("录屏讲课").font(.system(size: 14, weight: .semibold))
+            Text("录屏讲课").font(.system(size: 15, weight: .semibold))
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("只录课件", isOn: $recorder.coursewareOnly)
                     .help("工具栏、计时器等面板不会录进视频，你自己仍能看到和使用")
@@ -566,10 +566,10 @@ struct RecordingOptions: View {
                 Toggle("鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
                     .help("不录鼠标指针时，可以用激光笔在视频里指示")
             }
-            .font(.system(size: 13))
+            .font(.system(size: 14))
             .toggleStyle(SettingToggleStyle())
-            Text("视频保存到「影片 › 讲课板录课」")
-                .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Text("视频保存到「影片 › 录课」")
+                .font(.system(size: 12.5)).foregroundStyle(.secondary)
             Button {
                 presenter.closeFlyout()
                 presenter.toggleRecording()
@@ -581,7 +581,7 @@ struct RecordingOptions: View {
             .disabled(recorder.state != .idle)
             if let last = recorder.lastRecording {
                 Button("打开上次录制") { NSWorkspace.shared.open(last) }
-                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
             }
         }
@@ -605,7 +605,7 @@ struct ChromeHandle: View {
                 Circle().fill(recorder.isPaused ? .orange : .red).frame(width: 8, height: 8)
                 Text(LectureRecorder.format(recorder.elapsed)).font(.caption.monospacedDigit())
                 Button { presenter.togglePause() } label: {
-                    Image(systemName: recorder.isPaused ? "play.fill" : "pause.fill").font(.system(size: 13))
+                    Image(systemName: recorder.isPaused ? "play.fill" : "pause.fill").font(.system(size: 14))
                         .frame(width: 22, height: 22)
                         .contentShape(Rectangle())
                 }
@@ -614,7 +614,7 @@ struct ChromeHandle: View {
                 .accessibilityLabel(recorder.isPaused ? "继续录制" : "暂停录制")
             }
             Button { presenter.chromeVisible = true } label: {
-                Image(systemName: "chevron.up").font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.up").font(.system(size: 14, weight: .semibold))
                     .frame(width: 22, height: 22).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -638,10 +638,10 @@ struct PageGrid: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("页面").font(.system(size: 14, weight: .semibold))
+                Text("页面").font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).frame(width: 26, height: 26)
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .medium)).frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(QuietButtonStyle())
@@ -657,7 +657,7 @@ struct PageGrid: View {
                                     .padding(3)
                                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                                         .strokeBorder(i == doc.currentIndex ? Theme.accent : .clear, lineWidth: 2))
-                                Text("\(i + 1)").font(.system(size: 11).monospacedDigit())
+                                Text("\(i + 1)").font(.system(size: 12).monospacedDigit())
                                     .foregroundStyle(i == doc.currentIndex ? Theme.accent : .secondary)
                             }
                         }

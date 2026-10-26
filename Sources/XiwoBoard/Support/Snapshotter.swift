@@ -46,6 +46,12 @@ enum Snapshotter {
         UserDefaults.standard.set(true, forKey: "InspectorShown")
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
                to: dir.appendingPathComponent("editor-inspector.png"))
+        // Nothing selected: the panel shows the page's background, grid and notes.
+        let selection = doc.selection
+        doc.selection = []
+        render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
+               to: dir.appendingPathComponent("editor-page.png"))
+        doc.selection = selection
         UserDefaults.standard.set(inspectorWasShown, forKey: "InspectorShown")
         // Dark mode, with the app's appearance switched for the moment.
         let appearance = NSApp.appearance

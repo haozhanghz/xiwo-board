@@ -24,7 +24,7 @@ struct TimerView: View {
                 .onChange(of: mode) { _, _ in reset() }
                 Spacer()
                 Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).frame(width: 26, height: 26)
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .medium)).frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(QuietButtonStyle())
@@ -46,7 +46,7 @@ struct TimerView: View {
                     ForEach([30.0, 60, 180, 300, 600], id: \.self) { s in
                         Button { total = s; remaining = s } label: {
                             Text(s < 60 ? "\(Int(s))秒" : "\(Int(s / 60))分")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(total == s ? Theme.accent : .primary)
                                 .padding(.horizontal, 10).frame(height: 26)
                                 .background(total == s ? Theme.accent.opacity(0.2) : Color.white.opacity(0.08), in: Capsule())
@@ -63,7 +63,7 @@ struct TimerView: View {
                 .buttonStyle(PrimaryButtonStyle())
                 .keyboardShortcut(.space, modifiers: [])
                 Button { reset() } label: {
-                    Text("重置").font(.system(size: 13)).padding(.horizontal, 14).frame(height: 30)
+                    Text("重置").font(.system(size: 14)).padding(.horizontal, 14).frame(height: 30)
                         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .contentShape(Rectangle())
                 }
@@ -92,7 +92,7 @@ struct TimerView: View {
     }
 
     private func stepIcon(_ name: String) -> some View {
-        Image(systemName: name).font(.system(size: 13, weight: .semibold))
+        Image(systemName: name).font(.system(size: 14, weight: .semibold))
             .frame(width: 32, height: 32)
             .background(Color.white.opacity(0.08), in: Circle())
             .contentShape(Circle())

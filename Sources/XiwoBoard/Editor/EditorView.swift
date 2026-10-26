@@ -15,14 +15,14 @@ struct EditorView: View {
             Hairline()
             HStack(spacing: 0) {
                 SlideSidebar(doc: doc)
-                    .frame(width: 176)
+                    .frame(width: 184)
                 Hairline(vertical: true)
                 CanvasHost(doc: doc, tools: tools, mode: .edit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if inspectorShown {
                     Hairline(vertical: true)
                     InspectorView(doc: doc)
-                        .frame(width: 264)
+                        .frame(width: 280)
                 }
             }
             Hairline()
@@ -80,10 +80,10 @@ struct StatusBar: View {
             }
             Text("\(Int(doc.courseware.slideSize.width)) × \(Int(doc.courseware.slideSize.height))")
         }
-        .font(.system(size: 11).monospacedDigit())
+        .font(.system(size: 12).monospacedDigit())
         .foregroundStyle(Theme.secondaryText)
         .padding(.horizontal, 14)
-        .frame(height: 26)
+        .frame(height: 28)
         .background(Theme.background)
     }
 }
@@ -121,7 +121,7 @@ struct SlideSidebar: View {
             HStack(spacing: 2) {
                 Button { doc.addSlide() } label: {
                     Label("新建页面", systemImage: "plus")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.text)
                         .padding(.horizontal, 8).frame(height: 28)
                         .contentShape(Rectangle())
@@ -129,7 +129,7 @@ struct SlideSidebar: View {
                 .buttonStyle(QuietButtonStyle())
                 Spacer()
                 Button { doc.deleteSlide(at: doc.currentIndex) } label: {
-                    Image(systemName: "trash").font(.system(size: 12))
+                    Image(systemName: "trash").font(.system(size: 13))
                         .foregroundStyle(Theme.secondaryText)
                         .frame(width: 28, height: 28).contentShape(Rectangle())
                 }
@@ -156,7 +156,7 @@ struct SlideThumbnailRow: View, Equatable {
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             Text("\(index + 1)")
-                .font(.system(size: 11).monospacedDigit())
+                .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(selected ? Theme.text : Theme.tertiaryText)
                 .frame(width: 16, alignment: .trailing)
                 .padding(.top, 2)

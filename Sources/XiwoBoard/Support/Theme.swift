@@ -25,12 +25,12 @@ enum Theme {
     /// Opaque here and faded with opacity(), since a dynamic colour's own alpha is not kept in dark mode.
     private static let ink = dynamic(light: 0x141413, dark: 0xFAF9F5)
     static let text = dynamic(light: 0x141413, dark: 0xF5F4EF)
-    static let secondaryText = dynamic(light: 0x73726C, dark: 0xA6A39A)
-    static let tertiaryText = dynamic(light: 0x9C9A92, dark: 0x7A786F)
+    static let secondaryText = dynamic(light: 0x5F5E58, dark: 0xB8B5AC)
+    static let tertiaryText = dynamic(light: 0x6E6C66, dark: 0x96948B)
     /// The one accent: primary buttons, selection, focus.
     static let accent = Color(nsAccent)
     static let nsAccent = NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0xD97757) : hex(0xC96442)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0xC4643F) : hex(0xB95A39)
     }
 
     static func nsDynamic(light: UInt32, dark: UInt32, alpha: CGFloat = 1) -> NSColor {
@@ -77,7 +77,7 @@ struct QuietButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .opacity(enabled ? 1 : 0.4)
+                .opacity(enabled ? 1 : 0.55)
                 .onHover { hovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: hovering)
         }
@@ -96,9 +96,9 @@ struct PrimaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: 14, weight: .medium))
             .foregroundStyle(.white)
-            .padding(.horizontal, 14).frame(height: 30)
+            .padding(.horizontal, 14).frame(height: 32)
             .background(tint.opacity(configuration.isPressed ? 0.85 : 1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -106,7 +106,7 @@ struct PrimaryButtonStyle: ButtonStyle {
 
 /// An outlined button on the background, for secondary actions.
 struct SecondaryButtonStyle: ButtonStyle {
-    var height: CGFloat = 30
+    var height: CGFloat = 32
 
     func makeBody(configuration: Configuration) -> some View {
         SecondaryButtonBody(configuration: configuration, height: height)
@@ -120,10 +120,10 @@ private struct SecondaryButtonBody: View {
 
     var body: some View {
         configuration.label
-            .font(.system(size: height < 30 ? 12 : 13))
+            .font(.system(size: height < 32 ? 13 : 14))
             .foregroundStyle(Theme.text)
-            .opacity(enabled ? 1 : 0.4)
-            .padding(.horizontal, height < 30 ? 10 : 12).frame(height: height)
+            .opacity(enabled ? 1 : 0.55)
+            .padding(.horizontal, height < 32 ? 10 : 12).frame(height: height)
             .background(configuration.isPressed ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
             .contentShape(RoundedRectangle(cornerRadius: 8))
@@ -140,9 +140,9 @@ struct PillPicker<Value: Hashable>: View {
             ForEach(options, id: \.0) { value, title in
                 Button { selection = value } label: {
                     Text(title)
-                        .font(.system(size: 12, weight: selection == value ? .semibold : .regular))
+                        .font(.system(size: 13, weight: selection == value ? .semibold : .regular))
                         .foregroundStyle(selection == value ? Theme.text : Theme.secondaryText)
-                        .frame(maxWidth: .infinity, minHeight: 26)
+                        .frame(maxWidth: .infinity, minHeight: 28)
                         .background {
                             if selection == value {
                                 RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Theme.surface)
@@ -182,13 +182,13 @@ struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 18)
-                Text(title).font(.system(size: 13)).foregroundStyle(Theme.text)
+                Text(title).font(.system(size: 14)).foregroundStyle(Theme.text)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10).frame(height: 32)
+            .padding(.horizontal, 10).frame(height: 34)
             .contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle())
