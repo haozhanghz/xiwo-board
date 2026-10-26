@@ -1,19 +1,10 @@
 import SwiftUI
 import XiwoCore
 
-/// Start page: new courseware templates and recent files.
+/// Start page: recent files. New courseware starts blank; its background is picked in the inspector.
 struct HomeView: View {
     @EnvironmentObject var app: AppModel
     @State private var recent: [URL] = RecentFiles.urls
-
-    private let templates: [(String, SlideBackground)] = [
-        ("白板", SlideBackground()),
-        ("绿板", SlideBackground(color: .chalkboard, patternColor: RGBA(1, 1, 1, 0.3))),
-        ("黑板", SlideBackground(color: RGBA(0.12, 0.12, 0.14), patternColor: RGBA(1, 1, 1, 0.3))),
-        ("方格", SlideBackground(pattern: .grid)),
-        ("四线三格", SlideBackground(pattern: .fourLines, patternColor: RGBA(0.85, 0.3, 0.3))),
-        ("田字格", SlideBackground(pattern: .tianzige, patternColor: RGBA(0.2, 0.6, 0.3))),
-    ]
 
     var body: some View {
         HStack(spacing: 0) {
@@ -21,30 +12,25 @@ struct HomeView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    Text("新建课件").font(.title2.bold())
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 18)], spacing: 18) {
-                        ForEach(templates, id: \.0) { name, bg in
-                            Button { app.newDocument(background: bg) } label: {
-                                VStack(spacing: 8) {
-                                    SlidePreview(slide: Slide(background: bg), courseware: Courseware())
-                                        .frame(height: 96)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                                    Text(name).font(.callout)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
                     HStack {
                         Text("最近打开").font(.title2.bold())
                         Spacer()
                         Button("打开课件…") { app.openWithPanel() }
                     }
                     if recent.isEmpty {
-                        Text("还没有课件。新建一个，或打开 .xwb / .enbx 文件。")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 120)
+                        VStack(spacing: 14) {
+                            Text("还没有课件。新建一个，或打开 .xwb / .enbx 文件。")
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                Button { app.newDocument() } label: { Label("新建课件", systemImage: "plus") }
+                                    .buttonStyle(.borderedProminent)
+                                Button { app.openWithPanel() } label: { Label("打开课件…", systemImage: "folder") }
+                            }
+                            .controlSize(.large)
+                            Text("背景和书写格（绿板、方格、田字格等）在编辑界面右侧的「页面背景」里改。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 240)
                     } else {
                         VStack(spacing: 0) {
                             ForEach(recent, id: \.self) { url in
