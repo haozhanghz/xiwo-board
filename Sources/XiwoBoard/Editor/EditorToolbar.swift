@@ -255,13 +255,10 @@ struct PenSettings: View {
                 .toggleStyle(SettingToggleStyle())
                 .help("写快变细，提笔出锋")
                 .disabled(tools.penKind != .pen)
-            HStack {
+            HStack(spacing: 10) {
                 Text("防抖")
-                Picker("防抖", selection: $tools.penSteadiness) {
-                    ForEach(PenSteadiness.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                PillPicker(selection: $tools.penSteadiness, options: PenSteadiness.allCases.map { ($0, $0.label) })
+                    .accessibilityLabel("防抖")
             }
             .help("抹平手和数位板的细小抖动，笔迹更工整；转角和钩保持尖锐")
             HStack(spacing: 0) {
