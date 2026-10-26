@@ -72,9 +72,18 @@ struct EditorToolbar: View {
     @EnvironmentObject var app: AppModel
     @EnvironmentObject var tools: ToolState
     @FocusState private var titleFocused: Bool
+    @AppStorage("InspectorShown") private var inspectorShown = false
 
     var body: some View {
         HStack(spacing: 2) {
+            Button { app.closeDocument() } label: {
+                Image(systemName: "house").frame(width: 30, height: 26).contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help("返回首页")
+            .accessibilityLabel("返回首页")
+            .padding(.leading, 76) // clear the traffic lights
+
             Menu {
                 Button("新建课件") { app.newDocument() }
                 Button("打开课件…") { app.openWithPanel() }
@@ -94,7 +103,6 @@ struct EditorToolbar: View {
             .menuIndicator(.hidden)
             .frame(width: 30)
             .accessibilityLabel("文件菜单")
-            .padding(.leading, 76) // clear the traffic lights
 
             TextField("课件名称", text: Binding(get: { doc.pendingTitle ?? doc.title }, set: { doc.pendingTitle = $0 }))
                 .textFieldStyle(.plain)
@@ -115,6 +123,11 @@ struct EditorToolbar: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, 8)
+
+            RibbonButton(title: "属性", systemImage: "sidebar.right", active: inspectorShown,
+                         label: inspectorShown ? "收起属性面板" : "显示属性面板") { inspectorShown.toggle() }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .padding(.trailing, 6)
 
             Menu {
                 Button("从当前页开始") { app.startPresentation() }
