@@ -17,9 +17,9 @@ struct InspectorView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 18)
-            .frame(width: 264, alignment: .leading)
+            .frame(width: 280, alignment: .leading)
         }
-        .font(.system(size: 12))
+        .font(.system(size: 13))
         .foregroundStyle(Theme.text)
         .controlSize(.small)
         .toggleStyle(SettingToggleStyle())
@@ -36,7 +36,7 @@ struct InspectorSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !first { Hairline().padding(.bottom, 8) }
-            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.secondaryText)
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.secondaryText)
             content()
         }
     }
@@ -61,8 +61,8 @@ struct MenuField<Value: Hashable>: View {
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.secondaryText)
             }
-            .font(.system(size: 12))
-            .padding(.horizontal, 8).frame(height: 26)
+            .font(.system(size: 13))
+            .padding(.horizontal, 8).frame(height: 28)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
             .contentShape(Rectangle())
@@ -82,7 +82,7 @@ struct ValueSlider: View {
     var body: some View {
         HStack(spacing: 8) {
             Slider(value: $value, in: range)
-            Text(format(value)).font(.system(size: 11).monospacedDigit()).foregroundStyle(Theme.secondaryText)
+            Text(format(value)).font(.system(size: 12).monospacedDigit()).foregroundStyle(Theme.secondaryText)
                 .frame(width: 34, alignment: .trailing)
         }
     }
@@ -109,7 +109,7 @@ struct InspectorRow<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(label).foregroundStyle(Theme.text).frame(width: 44, alignment: .leading)
+            Text(label).foregroundStyle(Theme.text).frame(width: 48, alignment: .leading)
             content()
         }
     }
@@ -160,7 +160,7 @@ struct PageInspector: View {
                     doc.edit { cw in for i in cw.slides.indices { cw.slides[i].background = bg } }
                 }
             }
-            .buttonStyle(SecondaryButtonStyle(height: 26))
+            .buttonStyle(SecondaryButtonStyle(height: 28))
         }
         InspectorSection(title: "翻页动画") {
             MenuField(selection: Binding(get: { doc.slide.transition }, set: { t in doc.editSlide { $0.transition = t } }),
@@ -183,7 +183,7 @@ struct NotesEditor: View {
     var body: some View {
         TextEditor(text: $text)
             .focused($focused)
-            .font(.system(size: 12))
+            .font(.system(size: 13))
             .scrollContentBackground(.hidden)
             .padding(6)
             .frame(height: 120)
@@ -244,8 +244,8 @@ struct ElementInspector: View {
                 Button { doc.ungroupSelection() } label: { Text("取消组合").frame(maxWidth: .infinity) }
                     .disabled(!elements.contains { if case .group = $0.content { return true } else { return false } })
             }
-            .buttonStyle(SecondaryButtonStyle(height: 26))
-            .font(.system(size: 12))
+            .buttonStyle(SecondaryButtonStyle(height: 28))
+            .font(.system(size: 13))
         }
         InspectorSection(title: "授课") {
             Toggle("锁定", isOn: flag(\.locked))
@@ -255,7 +255,7 @@ struct ElementInspector: View {
                 TextField("超链接（网址或 页面:3）", text: Binding(get: { first.hyperlink ?? "" },
                                                            set: { v in doc.update(first.id) { $0.hyperlink = v.isEmpty ? nil : v } }))
                     .textFieldStyle(.plain)
-                    .padding(.horizontal, 8).frame(height: 26)
+                    .padding(.horizontal, 8).frame(height: 28)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
             }
@@ -272,8 +272,8 @@ struct ElementInspector: View {
 
     private func iconButton(_ icon: String, _ help: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Theme.secondaryText)
-                .frame(maxWidth: .infinity, minHeight: 26).contentShape(Rectangle())
+            Image(systemName: icon).font(.system(size: 14)).foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity, minHeight: 28).contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle(cornerRadius: 6)).help(help).accessibilityLabel(help)
     }
@@ -385,16 +385,16 @@ struct NumberField: View {
     var body: some View {
         // The caption sits inside the field, so every field in the grid lines up.
         HStack(spacing: 6) {
-            Text(label).font(.system(size: 11)).foregroundStyle(Theme.tertiaryText).fixedSize()
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.tertiaryText).fixedSize()
             TextField("", text: $text, onCommit: {
                 if let v = Double(text), v.isFinite { commit(v) }
                 text = format(value)
             })
                 .textFieldStyle(.plain)
-                .font(.system(size: 12).monospacedDigit())
+                .font(.system(size: 13).monospacedDigit())
                 .accessibilityLabel(label)
         }
-        .padding(.horizontal, 8).frame(width: 110, height: 26)
+        .padding(.horizontal, 8).frame(width: 116, height: 28)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
         .onAppear { text = format(value) }

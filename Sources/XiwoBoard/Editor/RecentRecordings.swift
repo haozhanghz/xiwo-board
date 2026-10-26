@@ -16,7 +16,7 @@ struct RecordingFile: Identifiable, Hashable {
         return trimmed.isEmpty ? name : trimmed
     }
 
-    /// The newest recordings in 「影片 › 讲课板录课」, newest first.
+    /// The newest recordings in 「影片 › 录课」, newest first.
     static func recent(limit: Int = 8) -> [RecordingFile] {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let urls = try? FileManager.default.contentsOfDirectory(
@@ -41,7 +41,7 @@ struct RecentRecordingsSection: View {
             }
             if recordings.isEmpty {
                 Text("授课时点「录制」录下的视频会出现在这里")
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(maxWidth: .infinity, minHeight: 96)
                     .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -86,7 +86,7 @@ private struct RecordingCard: View {
                         }
                         .overlay {
                             Image(systemName: "play.fill")
-                                .font(.system(size: 15))
+                                .font(.system(size: 16))
                                 .foregroundStyle(.white)
                                 .frame(width: 38, height: 38)
                                 .background(.black.opacity(0.45), in: Circle())
@@ -94,7 +94,7 @@ private struct RecordingCard: View {
                         }
                     if let duration {
                         Text(LectureRecorder.format(duration))
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .font(.system(size: 12, weight: .medium).monospacedDigit())
                             .foregroundStyle(.white)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -109,13 +109,13 @@ private struct RecordingCard: View {
             .help("播放")
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(file.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(file.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text).lineLimit(1)
                     Text("\(file.modified.formatted(.dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN")))) · \(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
-                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondaryText).lineLimit(1)
+                        .font(.system(size: 12.5)).foregroundStyle(Theme.secondaryText).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 ShareLink(item: file.url) {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 12))
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 13))
                         .foregroundStyle(Theme.secondaryText)
                 }
                 .buttonStyle(.borderless)
