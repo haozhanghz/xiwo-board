@@ -59,19 +59,22 @@ public struct InkSegment: Equatable, Sendable {
 ///
 /// A new point can only change the end of the line, so the pieces before it are
 /// `fixed` and only `tail` is redone. Each point costs the same however long the
-/// stroke is.
+/// stroke is, and only the last three points are kept to work it out.
 public struct InkTessellator: Sendable {
     public let width: Double
     public let kind: PenKind
     /// How far, in slide units, a straight piece may stray from the curve it stands for.
     public let tolerance: Double
 
-    public private(set) var points: [StrokePoint] = []
+    /// How many points the stroke has.
+    public private(set) var count = 0
+    /// The last three points, the newest last.
+    private var recent: [StrokePoint] = []
     /// Pieces later points cannot change.
     public private(set) var fixed: [InkSegment] = []
     /// The end of the line, redone with every point.
     public private(set) var tail: [InkSegment] = []
-    /// Brush widths after smoothing; the last one is still the raw width.
+    /// Brush widths of the last three points after smoothing; the newest is still the raw width.
     private var widths: [Double] = []
 
     public init(width: Double, kind: PenKind, tolerance: Double) {
@@ -90,31 +93,46 @@ public struct InkTessellator: Sendable {
     public var segmentCount: Int { fixed.count + tail.count }
 
     public mutating func append(_ p: StrokePoint) {
-        points.append(p)
+        count += 1
+        recent.append(p)
+        if recent.count > 3 { recent.removeFirst() }
         if kind == .brush { appendBrush() } else { appendSmoothed() }
     }
 
+    /// The pieces that would follow `fixed` if `points` came next, without keeping them:
+    /// for the end of a stroke that later samples can still move.
+    public func pieces(continuingWith points: [StrokePoint]) -> [InkSegment] {
+        guard !points.isEmpty else { return tail }
+        var t = self
+        t.fixed = []
+        for p in points { t.append(p) }
+        return t.fixed + t.tail
+    }
+
+    /// The point `back` places before the newest.
+    private func point(_ back: Int) -> StrokePoint { recent[recent.count - 1 - back] }
+
     private mutating func appendSmoothed() {
-        let n = points.count
+        let n = count
         let square = kind == .highlighter
-        let last = points[n - 1].cgPoint
+        let last = point(0).cgPoint
         // Only the pen has a nib.
-        func w(_ i: Int) -> Double { kind == .pen ? width * (points[i].widthScale ?? 1) : width }
+        func w(_ back: Int) -> Double { kind == .pen ? width * (point(back).widthScale ?? 1) : width }
         switch n {
         case 1:
             tail = [InkSegment(a: last, b: last, width: w(0))]
         case 2:
-            tail = [InkSegment(a: points[0].cgPoint, b: last, width: w(0), endWidth: w(1), squareStart: square, squareEnd: square)]
+            tail = [InkSegment(a: point(1).cgPoint, b: last, width: w(1), endWidth: w(0), squareStart: square, squareEnd: square)]
         default:
             // The curve that ended with a straight line to the previous point now bends
             // through it: control at that point, ending halfway to the new one.
-            let c = points[n - 2].cgPoint
-            let start = n == 3 ? points[0].cgPoint : Self.mid(points[n - 3].cgPoint, c)
+            let c = point(1).cgPoint
+            let start = n == 3 ? point(2).cgPoint : Self.mid(point(2).cgPoint, c)
             let end = Self.mid(c, last)
-            let startWidth = n == 3 ? w(0) : (w(n - 3) + w(n - 2)) / 2, endWidth = (w(n - 2) + w(n - 1)) / 2
+            let startWidth = n == 3 ? w(2) : (w(2) + w(1)) / 2, endWidth = (w(1) + w(0)) / 2
             if n == 3, square { fixed.append(squareStart(at: start, toward: c, or: end)) }
-            flatten(start, c, end, widths: startWidth, w(n - 2), endWidth)
-            tail = [InkSegment(a: end, b: last, width: endWidth, endWidth: w(n - 1), squareEnd: square)]
+            flatten(start, c, end, widths: startWidth, w(1), endWidth)
+            tail = [InkSegment(a: end, b: last, width: endWidth, endWidth: w(0), squareEnd: square)]
         }
     }
 
@@ -151,20 +169,21 @@ public struct InkTessellator: Sendable {
 
     private mutating func appendBrush() {
         func raw(_ p: StrokePoint) -> Double { width * (0.3 + 0.7 * max(0.05, min(1, p.pressure))) }
-        let n = points.count
-        widths.append(raw(points[n - 1]))
-        let last = points[n - 1].cgPoint
-        guard n > 1 else {
+        widths.append(raw(point(0)))
+        if widths.count > 3 { widths.removeFirst() }
+        let last = point(0).cgPoint
+        guard count > 1 else {
             tail = [InkSegment(a: last, b: last, width: widths[0])]
             return
         }
-        if n > 2 {
+        if count > 2 {
             // `drawBrush` smooths in place, so each width averages the already smoothed
             // one before it. The previous point now has a neighbour on both sides.
-            widths[n - 2] = (widths[n - 3] + 2 * widths[n - 2] + widths[n - 1]) / 4
-            fixed.append(InkSegment(a: points[n - 3].cgPoint, b: points[n - 2].cgPoint, width: (widths[n - 3] + widths[n - 2]) / 2))
+            widths[1] = (widths[0] + 2 * widths[1] + widths[2]) / 4
+            fixed.append(InkSegment(a: point(2).cgPoint, b: point(1).cgPoint, width: (widths[0] + widths[1]) / 2))
         }
-        tail = [InkSegment(a: points[n - 2].cgPoint, b: last, width: (widths[n - 2] + widths[n - 1]) / 2)]
+        let k = widths.count
+        tail = [InkSegment(a: point(1).cgPoint, b: last, width: (widths[k - 2] + widths[k - 1]) / 2)]
     }
 
     private static func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }

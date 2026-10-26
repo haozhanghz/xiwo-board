@@ -19,8 +19,8 @@ final class PenNibTests: XCTestCase {
 
     func testNibThinsWithSpeed() throws {
         let slow = write(speed: 0.02).1, fast = write(speed: 1.5).1
-        XCTAssertEqual(try XCTUnwrap(slow.last?.widthScale), 1.18, accuracy: 0.01)
-        XCTAssertEqual(try XCTUnwrap(fast.last?.widthScale), 0.72, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(slow.last?.widthScale), PenNib.slowScale, accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(fast.last?.widthScale), PenNib.fastScale, accuracy: 0.01)
         // The width eases from one to the other instead of jumping.
         for (a, b) in zip(fast, fast.dropFirst()) { XCTAssertLessThan(abs(a.widthScale! - b.widthScale!), 0.1) }
         // The same speed on screen at another zoom writes the same line.
@@ -29,6 +29,33 @@ final class PenNibTests: XCTestCase {
         // Pressing harder widens it.
         var light = PenNib(width: 4, scale: 1), hard = PenNib(width: 4, scale: 1)
         XCTAssertLessThan(light.widthScale(at: .zero, time: 0, pressure: 0.2), hard.widthScale(at: .zero, time: 0, pressure: 0.9))
+    }
+
+    /// A tablet's jitter moves the pen back and forth between samples; it must not read
+    /// as speed, or a slow, careful line comes out thin and uneven.
+    func testJitterDoesNotThinASlowLine() {
+        var nib = PenNib(width: 4, scale: 1)
+        var widths: [Double] = []
+        for i in 0..<240 {
+            // 0.05 points a millisecond, shaking by up to a point either way.
+            let shake = sin(Double(i) * 12.9898) * 43758.5453
+            let p = CGPoint(x: 50 + Double(i) * 0.05 * 1000 / 240, y: 80 + 2 * (shake - shake.rounded(.down) - 0.5))
+            widths.append(nib.widthScale(at: p, time: 1 + Double(i) / 240, pressure: nil))
+        }
+        // Measured from one sample to the next, this shake thinned the line by up to 4 %
+        // and made it waver by 3 %.
+        let settled = widths.dropFirst(60)
+        XCTAssertGreaterThan(settled.min()!, PenNib.slowScale - 0.01)
+        XCTAssertLessThan(settled.max()! - settled.min()!, 0.005)
+    }
+
+    /// The pen lands at its plain width, not the fuller one it reaches if it stays, so a
+    /// stroke does not start with a blot.
+    func testPenLandsAtItsPlainWidth() {
+        var mouse = PenNib(width: 4, scale: 1), tablet = PenNib(width: 4, scale: 1)
+        XCTAssertEqual(mouse.widthScale(at: .zero, time: 0, pressure: nil), 1)
+        XCTAssertEqual(tablet.widthScale(at: .zero, time: 0, pressure: 0.5), 1)
+        XCTAssertEqual(mouse.widthScale(at: .zero, time: 0.004, pressure: nil), 1.02, accuracy: 0.01)
     }
 
     func testFlickEndsInAPoint() throws {

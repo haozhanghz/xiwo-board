@@ -203,6 +203,15 @@ struct PenSettings: View {
             // Stays in place for the other pens, so the popover keeps its size.
             Toggle("笔锋（写快变细，提笔出锋）", isOn: $tools.penNib)
                 .disabled(tools.penKind != .pen)
+            HStack {
+                Text("防抖")
+                Picker("防抖", selection: $tools.penSteadiness) {
+                    ForEach(PenSteadiness.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            .help("抹平手和数位板的细小抖动，笔迹更工整；转角和钩保持尖锐")
             HStack(spacing: 0) {
                 ForEach(ToolState.penWidths, id: \.self) { w in
                     Button { tools.penWidth = tools.penKind == .highlighter ? w * 3 : w } label: {

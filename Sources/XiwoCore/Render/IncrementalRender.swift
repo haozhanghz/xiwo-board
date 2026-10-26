@@ -35,11 +35,12 @@ extension SlideRenderer {
         return CGRect(x: box.minX, y: box.minY, width: box.width, height: 1e7)
     }
 
-    /// What can change on screen when the last of `points` has just been added to a
-    /// stroke being written: the smoothed line only re-bends its last two segments and
-    /// brush widths only look one point back, so the last three points bound it.
-    public static func liveStrokeTail(_ points: [StrokePoint], width: Double, kind: PenKind) -> CGRect {
-        let tail = points.suffix(3)
+    /// What can change on screen when the points of a stroke being written from `start` on
+    /// have just been added or moved (by default only the last one): the smoothed line
+    /// re-bends the two segments before a point and brush widths only look one point
+    /// back, so those points and the two before them bound it.
+    public static func liveStrokeTail(_ points: [StrokePoint], from start: Int? = nil, width: Double, kind: PenKind) -> CGRect {
+        let tail = points[min(points.count, max(0, (start ?? points.count - 1) - 2))...]
         let r = tail.reduce(CGRect.null) { $0.union(CGRect(x: $1.x, y: $1.y, width: 0, height: 0)) }
         // Square highlighter caps reach further out at their corners than half the width,
         // and a nib can widen the pen at these points; one more unit covers antialiasing.
