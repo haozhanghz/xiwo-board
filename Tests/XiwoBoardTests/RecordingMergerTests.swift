@@ -170,6 +170,49 @@ final class RecordingMergerTests: XCTestCase {
         XCTAssertEqual(pixel.leadingChannel, 1)
     }
 
+    /// A voice that came in quiet is raised to the speaking level, picture untouched.
+    func testRaisesQuietSound() async throws {
+        let part = dir.appendingPathComponent("quiet.mp4")
+        try await Self.writePart(to: part, seconds: 2, color: Pixel(r: 30, g: 200, b: 30), loud: true, soundTracks: 1, amplitude: 1_200)
+        let levelled = dir.appendingPathComponent("levelled.mp4")
+        let raised = try await RecordingMerger.level(part, into: levelled)
+        XCTAssertTrue(raised)
+
+        let asset = AVURLAsset(url: levelled)
+        let duration = try await asset.load(.duration)
+        XCTAssertEqual(duration.seconds, 2, accuracy: 0.05)
+        let sound = try await asset.loadTracks(withMediaType: .audio)
+        XCTAssertEqual(sound.count, 1)
+        // -16 dBFS is 5196 in 16-bit units; the tone started at 849.
+        let level = try Self.loudness(of: asset, track: sound[0], from: 0.5, to: 1.5)
+        XCTAssertEqual(level, 5196, accuracy: 400)
+        let pixel = try await Self.pixel(of: asset, at: 1)
+        XCTAssertEqual(pixel.leadingChannel, 1)
+    }
+
+    /// Sound already at a speaking level, and silence, are left as recorded.
+    func testLeavesLoudSoundAndSilenceAlone() async throws {
+        for loud in [true, false] {
+            let part = dir.appendingPathComponent("part-\(loud).mp4")
+            try await Self.writePart(to: part, seconds: 1, color: Pixel(r: 220, g: 30, b: 30), loud: loud, soundTracks: 1)
+            let levelled = dir.appendingPathComponent("levelled-\(loud).mp4")
+            let raised = try await RecordingMerger.level(part, into: levelled)
+            XCTAssertFalse(raised)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: levelled.path))
+        }
+    }
+
+    /// Peaks the gain would push past full scale are rounded off, not wrapped or clipped hard.
+    func testRaisedPeaksStayInRange() {
+        XCTAssertEqual(RecordingMerger.Leveler.raise(1_000, by: 2), 2_000)
+        XCTAssertEqual(RecordingMerger.Leveler.raise(-1_000, by: 2), -2_000)
+        let loud = RecordingMerger.Leveler.raise(30_000, by: 4)
+        XCTAssertGreaterThan(loud, 30_000)
+        XCTAssertLessThanOrEqual(loud, 32_767)
+        XCTAssertLessThan(RecordingMerger.Leveler.raise(-30_000, by: 4), -30_000)
+        XCTAssertLessThan(RecordingMerger.Leveler.raise(20_000, by: 1.5), RecordingMerger.Leveler.raise(25_000, by: 1.5))
+    }
+
     func testRefusesNothingToJoin() async {
         do {
             try await RecordingMerger.merge([], into: dir.appendingPathComponent("none.mp4"))
@@ -194,7 +237,8 @@ final class RecordingMergerTests: XCTestCase {
     /// With `reorderFrames` the picture uses B-frames and a darker bar moves across it; with
     /// `stopsJustAfterLastFrame` the part ends 1/600 s after its last frame.
     static func writePart(to url: URL, seconds: Double, color: Pixel, loud: Bool, soundTracks: Int,
-                          reorderFrames: Bool = false, stopsJustAfterLastFrame: Bool = false) async throws {
+                          reorderFrames: Bool = false, stopsJustAfterLastFrame: Bool = false,
+                          amplitude: Double = 12_000) async throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let side = 64
         var settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: side, AVVideoHeightKey: side]
@@ -238,7 +282,7 @@ final class RecordingMergerTests: XCTestCase {
             }
             for (i, input) in sounds.enumerated() where written[i] < samples && input.isReadyForMoreMediaData {
                 let n = min(chunk, samples - written[i])
-                XCTAssertTrue(input.append(try tone(from: written[i], count: n, loud: loud)))
+                XCTAssertTrue(input.append(try tone(from: written[i], count: n, loud: loud, amplitude: amplitude)))
                 written[i] += n
                 if written[i] == samples { input.markAsFinished() }
                 progressed = true
@@ -269,8 +313,8 @@ final class RecordingMergerTests: XCTestCase {
         return buffer
     }
 
-    /// 16-bit mono PCM at 48 kHz: a 440 Hz tone when `loud`, otherwise silence.
-    static func tone(from start: Int, count: Int, loud: Bool) throws -> CMSampleBuffer {
+    /// 16-bit mono PCM at 48 kHz: a 440 Hz tone peaking at `amplitude` when `loud`, otherwise silence.
+    static func tone(from start: Int, count: Int, loud: Bool, amplitude: Double = 12_000) throws -> CMSampleBuffer {
         var asbd = AudioStreamBasicDescription(
             mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
@@ -284,7 +328,7 @@ final class RecordingMergerTests: XCTestCase {
                                            flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
         guard let format, let block else { throw CocoaError(.featureUnsupported) }
         let values = (0..<count).map { i -> Int16 in
-            loud ? Int16(12_000 * sin(2 * Double.pi * 440 * Double(start + i) / 48_000)) : 0
+            loud ? Int16(amplitude * sin(2 * Double.pi * 440 * Double(start + i) / 48_000)) : 0
         }
         values.withUnsafeBytes { bytes in
             _ = CMBlockBufferReplaceDataBytes(with: bytes.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: count * 2)

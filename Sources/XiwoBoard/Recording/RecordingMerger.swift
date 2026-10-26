@@ -15,7 +15,18 @@ private protocol MergeFeed: AnyObject {
 /// part starts where the one before it ended; its sound is decoded and written again
 /// as one continuous track per source, with silence where a part has none. The result
 /// is a single plain timeline that every player and editor reads the same way.
+///
+/// ScreenCaptureKit writes the microphone as it comes in, with no gain, so a voice
+/// a little way from a laptop's microphone ends up well below what other videos
+/// play at. While the sound is written again it is raised to a common speaking
+/// level (`Leveler`); sound that is already that loud is left as it is.
 enum RecordingMerger {
+    /// Raises a recording's quiet sound into `output`, the picture copied as recorded.
+    /// Returns false, writing nothing, when no sound track needs it.
+    static func level(_ recording: URL, into output: URL) async throws -> Bool {
+        try await join([recording], into: output, onlyIfLevelled: true)
+    }
+
     static func merge(_ parts: [URL], into output: URL) async throws {
         do {
             try await join(parts, into: output)
@@ -44,7 +55,10 @@ enum RecordingMerger {
         var end: CMTime { start + window.duration }
     }
 
-    static func join(_ urls: [URL], into output: URL) async throws {
+    /// Joins `urls` into `output`. With `onlyIfLevelled`, writes nothing and returns
+    /// false when the sound is loud enough as it is.
+    @discardableResult
+    static func join(_ urls: [URL], into output: URL, onlyIfLevelled: Bool = false) async throws -> Bool {
         var parts: [Part] = []
         var cursor = CMTime.zero
         for url in urls {
@@ -81,6 +95,17 @@ enum RecordingMerger {
         let lead = try decodeLead(of: parts[0])
         for i in parts.indices { parts[i].start = parts[i].start + lead }
 
+        var sounds: [(channels: Int, gain: Float)] = []
+        for n in 0..<(parts.map(\.sound.count).max() ?? 0) {
+            let source = parts.lazy.compactMap { $0.sound.count > n ? $0.sound[n] : nil }.first!
+            let format = try await source.load(.formatDescriptions).first
+            let sourceChannels = format.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mChannelsPerFrame } ?? 1
+            let channels = Int(min(2, max(1, sourceChannels)))
+            sounds.append((channels, try Leveler.gain(for: parts, track: n, channels: channels)))
+        }
+        log.info("Sound gains: \(sounds.map { String(format: "%.1f dB", 20 * log10($0.gain)) }.joined(separator: ", "), privacy: .public)")
+        if onlyIfLevelled, !sounds.contains(where: { $0.gain > 1 }) { return false }
+
         try? FileManager.default.removeItem(at: output)
         let writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
         var feeds: [(AVAssetWriterInput, MergeFeed)] = []
@@ -93,11 +118,7 @@ enum RecordingMerger {
             writer.add(input)
             feeds.append((input, PictureFeed(parts: parts, tick: CMTime(value: 1, timescale: try await first.load(.naturalTimeScale)))))
         }
-        for n in 0..<(parts.map(\.sound.count).max() ?? 0) {
-            let source = parts.lazy.compactMap { $0.sound.count > n ? $0.sound[n] : nil }.first!
-            let format = try await source.load(.formatDescriptions).first
-            let sourceChannels = format.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mChannelsPerFrame } ?? 1
-            let channels = Int(min(2, max(1, sourceChannels)))
+        for (n, (channels, gain)) in sounds.enumerated() {
             let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: SoundFeed.rate, AVNumberOfChannelsKey: channels,
                 AVEncoderBitRateKey: channels == 1 ? 96_000 : 160_000,
@@ -105,7 +126,7 @@ enum RecordingMerger {
             input.expectsMediaDataInRealTime = false
             guard writer.canAdd(input) else { throw MergeError.cannotJoin }
             writer.add(input)
-            feeds.append((input, try SoundFeed(parts: parts, track: n, channels: channels)))
+            feeds.append((input, try SoundFeed(parts: parts, track: n, channels: channels, gain: gain)))
         }
         guard !feeds.isEmpty else { throw MergeError.empty }
 
@@ -122,6 +143,7 @@ enum RecordingMerger {
         writer.endSession(atSourceTime: parts[parts.count - 1].end)
         await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? MergeError.cannotJoin }
+        return true
     }
 
     /// The least time a frame stays on screen where one part meets the next: one refresh
@@ -264,6 +286,7 @@ enum RecordingMerger {
         private let parts: [Part]
         private let track: Int
         private let channels: Int
+        private let gain: Float
         private let format: CMAudioFormatDescription
         private var bytesPerFrame: Int { channels * 2 }
         private var index = -1
@@ -273,10 +296,11 @@ enum RecordingMerger {
         private var written: Int
         private var pending: [CMSampleBuffer] = []
 
-        init(parts: [Part], track: Int, channels: Int) throws {
+        init(parts: [Part], track: Int, channels: Int, gain: Float = 1) throws {
             self.parts = parts
             self.track = track
             self.channels = channels
+            self.gain = gain
             written = Self.frame(at: parts[0].start)
             var asbd = AudioStreamBasicDescription(
                 mSampleRate: Double(Self.rate), mFormatID: kAudioFormatLinearPCM,
@@ -312,23 +336,27 @@ enum RecordingMerger {
                     try silence(until: Self.frame(at: part.end))
                     continue
                 }
-                var layout = AudioChannelLayout()
-                layout.mChannelLayoutTag = channels == 1 ? kAudioChannelLayoutTag_Mono : kAudioChannelLayoutTag_Stereo
-                let r = try AVAssetReader(asset: part.asset)
-                r.timeRange = part.window
-                let o = AVAssetReaderTrackOutput(track: part.sound[track], outputSettings: [
-                    AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: Self.rate, AVNumberOfChannelsKey: channels,
-                    AVChannelLayoutKey: Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size),
-                    AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
-                    AVLinearPCMIsNonInterleaved: false,
-                ])
-                guard r.canAdd(o) else { throw MergeError.cannotJoin }
-                r.add(o)
-                guard r.startReading() else { throw r.error ?? MergeError.cannotJoin }
-                reader = r
-                output = o
+                (reader, output) = try Self.decoder(for: part, track: track, channels: channels)
             }
             return pending.removeFirst()
+        }
+
+        /// Reads one sound track of a part's window as 16-bit PCM at `rate`.
+        static func decoder(for part: Part, track: Int, channels: Int) throws -> (AVAssetReader, AVAssetReaderTrackOutput) {
+            var layout = AudioChannelLayout()
+            layout.mChannelLayoutTag = channels == 1 ? kAudioChannelLayoutTag_Mono : kAudioChannelLayoutTag_Stereo
+            let r = try AVAssetReader(asset: part.asset)
+            r.timeRange = part.window
+            let o = AVAssetReaderTrackOutput(track: part.sound[track], outputSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate, AVNumberOfChannelsKey: channels,
+                AVChannelLayoutKey: Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size),
+                AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false,
+            ])
+            guard r.canAdd(o) else { throw MergeError.cannotJoin }
+            r.add(o)
+            guard r.startReading() else { throw r.error ?? MergeError.cannotJoin }
+            return (r, o)
         }
 
         /// Puts decoded sound where it belongs in the joined track: silence first if it
@@ -346,6 +374,12 @@ enum RecordingMerger {
                 CMBlockBufferCopyDataBytes(block, atOffset: skip * bytesPerFrame, dataLength: keep * bytesPerFrame, destination: $0.baseAddress!)
             }
             guard status == noErr else { throw MergeError.cannotJoin }
+            if gain != 1 {
+                bytes.withUnsafeMutableBytes { raw in
+                    let samples = raw.bindMemory(to: Int16.self)
+                    for i in samples.indices { samples[i] = Leveler.raise(samples[i], by: gain) }
+                }
+            }
             try emit(bytes)
         }
 
@@ -375,6 +409,84 @@ enum RecordingMerger {
             guard status == noErr, let sample else { throw MergeError.cannotJoin }
             pending.append(sample)
             written += frames
+        }
+    }
+
+    /// How much to raise one sound track so that speech in it plays at `target`.
+    ///
+    /// The level is measured like broadcast loudness, in tenth-of-a-second blocks: blocks
+    /// below `floor` (room noise, pauses) are left out, then those more than 10 dB under
+    /// the rest, so the pauses between sentences do not pull the level down. Loud peaks
+    /// that the gain would push past full scale are rounded off by `raise` instead of
+    /// clipped, and the gain is held back so only the rarest peaks need that.
+    enum Leveler {
+        /// Speech level aimed for, as the RMS of its loud blocks: about the -16 LUFS that
+        /// podcasts and spoken videos play at.
+        static let target: Float = -16
+        /// Blocks quieter than this hold no speech worth measuring.
+        static let floor: Float = -50
+        /// At most this many dB louder, so a recording with no one near the microphone
+        /// does not become a recording of loud hiss.
+        static let maximumGain: Float = 20
+        /// Where `raise` starts rounding peaks off, as a share of full scale.
+        static let knee: Float = 0.6
+
+        static func gain(for parts: [Part], track: Int, channels: Int) throws -> Float {
+            let block = SoundFeed.rate / 10 * channels
+            var energies: [Float] = []
+            var sum: Double = 0, count = 0
+            // Peaks in 1/1000ths of full scale, to find the level the loudest 0.1% reach.
+            var peaks = [Int](repeating: 0, count: 1001)
+            for part in parts where part.sound.count > track {
+                let (reader, output) = try SoundFeed.decoder(for: part, track: track, channels: channels)
+                while let buffer = output.copyNextSampleBuffer() {
+                    guard let data = CMSampleBufferGetDataBuffer(buffer) else { continue }
+                    let length = CMBlockBufferGetDataLength(data)
+                    var bytes = Data(count: length)
+                    let status = bytes.withUnsafeMutableBytes {
+                        CMBlockBufferCopyDataBytes(data, atOffset: 0, dataLength: length, destination: $0.baseAddress!)
+                    }
+                    guard status == noErr else { throw MergeError.cannotJoin }
+                    bytes.withUnsafeBytes { raw in
+                        for value in raw.bindMemory(to: Int16.self) {
+                            let x = Double(value) / 32768
+                            sum += x * x
+                            count += 1
+                            peaks[min(1000, Int(abs(x) * 1000))] += 1
+                            if count == block {
+                                energies.append(Float(sum / Double(count)))
+                                sum = 0
+                                count = 0
+                            }
+                        }
+                    }
+                }
+                if reader.status == .failed { throw reader.error ?? MergeError.cannotJoin }
+            }
+            let floorEnergy = pow(10, floor / 10)
+            let heard = energies.filter { $0 > floorEnergy }
+            guard !heard.isEmpty else { return 1 }
+            let gate = heard.reduce(0, +) / Float(heard.count) / 10
+            let speech = heard.filter { $0 > gate }
+            let level = 10 * log10(speech.reduce(0, +) / Float(speech.count))
+            var gain = pow(10, (min(target - level, maximumGain)) / 20)
+            // The loudest 0.1% of samples may be rounded off; louder than 1.5 × full scale
+            // they would sound squashed.
+            var rare = peaks.reduce(0, +) / 1000, peak = 1000
+            while peak > 0, rare - peaks[peak] > 0 { rare -= peaks[peak]; peak -= 1 }
+            gain = min(gain, 1.5 / max(Float(peak) / 1000, 0.001))
+            // Within a decibel is loud enough; not worth writing the sound again.
+            return gain > pow(10, 1 / 20) ? gain : 1
+        }
+
+        /// `sample` made `gain` times louder, with peaks above `knee` rounded off
+        /// smoothly towards full scale instead of clipped.
+        static func raise(_ sample: Int16, by gain: Float) -> Int16 {
+            let x = Float(sample) / 32768 * gain
+            let magnitude = abs(x)
+            guard magnitude > knee else { return Int16(x * 32768) }
+            let rounded = knee + (1 - knee) * tanh((magnitude - knee) / (1 - knee))
+            return Int16(max(-32768, min(32767, (x < 0 ? -rounded : rounded) * 32768)))
         }
     }
 

@@ -269,11 +269,15 @@ final class LectureRecorder: NSObject, ObservableObject {
         return failure
     }
 
-    /// Leaves a single part where it is; joins several into `url`, replacing the first
-    /// part, and deletes the rest. If joining fails the parts stay on disk.
+    /// Joins several parts into `url`, replacing the first part, and deletes the rest.
+    /// If joining fails the parts stay on disk. A single part stays where it is, with
+    /// its sound raised if the voice came in quiet.
     private func save(_ parts: [URL], as url: URL) async throws -> URL? {
         let parts = parts.filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard parts.count > 1 else { return parts.first }
+        guard parts.count > 1 else {
+            if let only = parts.first { await level(only) }
+            return parts.first
+        }
         log.info("Joining \(parts.count) parts")
         let joined = url.deletingPathExtension().appendingPathExtension("joining.mp4")
         do {
@@ -289,6 +293,21 @@ final class LectureRecorder: NSObject, ObservableObject {
         }
         for part in parts where part != url { try? FileManager.default.removeItem(at: part) }
         return url
+    }
+
+    /// Raises quiet sound in a finished recording. If that fails the recording is kept
+    /// as it was.
+    private func level(_ url: URL) async {
+        let levelled = url.deletingPathExtension().appendingPathExtension("levelling.mp4")
+        do {
+            if try await RecordingMerger.level(url, into: levelled) {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: levelled)
+                log.info("Raised the recording's sound")
+            }
+        } catch {
+            log.error("Raising the sound failed, keeping it as recorded: \(String(describing: error), privacy: .public)")
+        }
+        try? FileManager.default.removeItem(at: levelled)
     }
 
     private func waitForFinish() async throws {
