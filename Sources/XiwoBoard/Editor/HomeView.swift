@@ -33,7 +33,9 @@ struct HomeView: View {
     private var recentSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "最近打开") {
-                if !recent.isEmpty { Button("打开其他课件…") { app.openWithPanel() } }
+                if !recent.isEmpty {
+                    Button { app.openWithPanel() } label: { Label("打开其他课件…", systemImage: "folder") }
+                }
             }
             if recent.isEmpty {
                 VStack(spacing: 12) {
@@ -90,9 +92,6 @@ struct HomeView: View {
             }
             .buttonStyle(QuietButtonStyle())
             SidebarRow(title: "打开课件…", systemImage: "folder") { app.openWithPanel() }
-            SidebarRow(title: "示例课件", systemImage: "sparkles") {
-                if app.confirmClose() { app.document = DocumentModel(courseware: SampleCourseware.make()) }
-            }
             Spacer()
             HStack {
                 Text("版本 \(Updater.shared.currentVersion)")
@@ -125,10 +124,7 @@ struct SectionHeader<Trailing: View>: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.secondaryText)
             Spacer()
-            trailing()
-                .buttonStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
+            trailing().buttonStyle(LinkButtonStyle())
         }
         .padding(.horizontal, 4)
     }
@@ -142,11 +138,12 @@ private struct RecentFileRow: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 12) {
-                Image(systemName: url.pathExtension.lowercased() == "enbx" ? "doc.richtext" : "rectangle.on.rectangle")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.secondaryText)
+                // One look for every courseware, whichever format it was saved in.
+                Image(systemName: "pencil.and.scribble")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.accent)
                     .frame(width: 30, height: 30)
-                    .background(Theme.hover, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(url.deletingPathExtension().lastPathComponent)
                         .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text)

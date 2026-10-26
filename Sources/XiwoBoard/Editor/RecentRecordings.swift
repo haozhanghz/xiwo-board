@@ -37,7 +37,7 @@ struct RecentRecordingsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "最近录屏") {
-                Button("打开录课文件夹") { openFolder() }
+                Button { openFolder() } label: { Label("打开录课文件夹", systemImage: "folder") }
             }
             if recordings.isEmpty {
                 Text("授课时点「录制」录下的视频会出现在这里")

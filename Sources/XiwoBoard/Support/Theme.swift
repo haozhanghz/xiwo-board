@@ -130,6 +130,41 @@ private struct SecondaryButtonBody: View {
     }
 }
 
+/// A small text action beside a section title: grey, darkening on a soft fill under the pointer.
+struct LinkButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        LinkButtonBody(configuration: configuration)
+    }
+
+    private struct LinkButtonBody: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .labelStyle(LinkLabelStyle())
+                .font(.system(size: 13, weight: hovering ? .medium : .regular))
+                .foregroundStyle(hovering ? Theme.text : Theme.secondaryText)
+                .padding(.horizontal, 8).frame(height: 26)
+                .background(configuration.isPressed ? Theme.selected : hovering ? Theme.hover : .clear,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+                .pointerStyle(.link)
+                .animation(.easeOut(duration: 0.12), value: hovering)
+        }
+    }
+
+    private struct LinkLabelStyle: LabelStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 5) {
+                configuration.icon.font(.system(size: 12))
+                configuration.title
+            }
+        }
+    }
+}
+
 /// Segmented choice drawn as a soft track with a raised pill, used instead of the system control.
 struct PillPicker<Value: Hashable>: View {
     @Binding var selection: Value

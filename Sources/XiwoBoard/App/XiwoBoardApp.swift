@@ -130,6 +130,12 @@ final class AppModel: ObservableObject {
         presenter = p
         p.show()
     }
+
+    /// 录课: into the lecture if not there yet, and recording straight away.
+    func recordLesson() {
+        if presenter == nil { startPresentation() }
+        presenter?.startRecording()
+    }
 }
 
 struct RootView: View {
@@ -144,6 +150,7 @@ struct RootView: View {
                 HomeView()
             }
         }
+        .mainWindowChrome()
         .background(MainWindowCloseGuard())
     }
 }
@@ -186,6 +193,13 @@ struct AppCommands: Commands {
                 .disabled(app.document == nil)
             Button("从第一页开始授课") { app.startPresentation(fromBeginning: true) }.keyboardShortcut(.return, modifiers: [.command, .shift])
                 .disabled(app.document == nil)
+            Divider()
+            Button("开始录课") { app.recordLesson() }.keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(app.document == nil)
+            Button("暂停 / 继续录课") { app.presenter?.togglePause() }.keyboardShortcut("p", modifiers: [.command, .option])
+                .disabled(app.presenter == nil)
+            Button("结束录课") { app.presenter?.stopRecording() }.keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(app.presenter == nil)
             Divider()
             Button("新建页面") { app.document?.addSlide() }.keyboardShortcut("m", modifiers: [.command, .shift])
                 .disabled(app.document == nil)

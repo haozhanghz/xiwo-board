@@ -80,6 +80,10 @@ struct EditorToolbar: View {
     @EnvironmentObject var tools: ToolState
     @FocusState private var titleFocused: Bool
     @AppStorage("InspectorShown") private var inspectorShown = false
+    /// Text, shapes, pictures and the other insert tools; folded away until asked for,
+    /// so the bar leads with writing and recording.
+    @AppStorage("InsertToolsShown") private var insertToolsShown = false
+    @State private var isFullScreen = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -90,7 +94,8 @@ struct EditorToolbar: View {
             .buttonStyle(QuietButtonStyle())
             .help("返回首页")
             .accessibilityLabel("返回首页")
-            .padding(.leading, 78) // clear the traffic lights
+            // Just clear of the window buttons, which full screen hides.
+            .padding(.leading, isFullScreen ? 12 : 80)
 
             Rectangle().fill(Theme.divider).frame(width: 1, height: 16).padding(.horizontal, 8)
 
@@ -152,11 +157,15 @@ struct EditorToolbar: View {
             .accessibilityLabel(inspectorShown ? "收起属性面板" : "显示属性面板")
             .padding(.trailing, 8)
 
+            RecordLessonButton { app.recordLesson() }
+                .padding(.trailing, 8)
+
             PresentButton(app: app)
                 .padding(.trailing, 14)
         }
-        .frame(height: 52)
+        .frame(height: MainWindowChrome.barHeight)
         .background(Theme.background)
+        .modifier(FullScreenReader(isFullScreen: $isFullScreen))
     }
 
     private var toolButtons: some View {
@@ -171,20 +180,29 @@ struct EditorToolbar: View {
             RibbonPopoverButton(title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser,
                                 onTap: { tools.tool = .eraser }) { EraserSettings(doc: doc) }
             divider
-            RibbonButton(title: "文本", systemImage: "character.textbox", active: tools.tool == .text) { tools.tool = .text }
-            RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: isShapeTool) {
-                ShapePicker { tools.tool = .shape($0) }
+            if insertToolsShown {
+                RibbonButton(title: "文本", systemImage: "character.textbox", active: tools.tool == .text) { tools.tool = .text }
+                RibbonPopoverButton(title: "形状", systemImage: "square.on.circle", active: isShapeTool) {
+                    ShapePicker { tools.tool = .shape($0) }
+                }
+                RibbonButton(title: "图片", systemImage: "photo") { Exporter.insertImages(into: doc) }
+                RibbonButton(title: "音视频", systemImage: "film") { Exporter.insertMedia(into: doc) }
+                RibbonPopoverButton(title: "表格", systemImage: "tablecells") { TablePicker { r, c in doc.insertTable(rows: r, columns: c) } }
+                RibbonPopoverButton(title: "学科工具", systemImage: "function") { SubjectTools(doc: doc) }
+                RibbonButton(title: "蒙层", systemImage: "rectangle.dashed.badge.record",
+                             active: !doc.selectedElements.isEmpty && doc.selectedElements.allSatisfy(\.masked)) {
+                    let all = doc.selectedElements.allSatisfy(\.masked)
+                    doc.updateSelected { $0.masked = !all }
+                }
+                .disabled(doc.selection.isEmpty)
             }
-            RibbonButton(title: "图片", systemImage: "photo") { Exporter.insertImages(into: doc) }
-            RibbonButton(title: "音视频", systemImage: "film") { Exporter.insertMedia(into: doc) }
-            RibbonPopoverButton(title: "表格", systemImage: "tablecells") { TablePicker { r, c in doc.insertTable(rows: r, columns: c) } }
-            RibbonPopoverButton(title: "学科工具", systemImage: "function") { SubjectTools(doc: doc) }
-            RibbonButton(title: "蒙层", systemImage: "rectangle.dashed.badge.record",
-                         active: !doc.selectedElements.isEmpty && doc.selectedElements.allSatisfy(\.masked)) {
-                let all = doc.selectedElements.allSatisfy(\.masked)
-                doc.updateSelected { $0.masked = !all }
+            RibbonButton(title: insertToolsShown ? "收起" : "插入",
+                         systemImage: insertToolsShown ? "chevron.left" : "plus.square.on.square",
+                         label: insertToolsShown ? "收起插入工具" : "插入文本、形状、图片等") {
+                if insertToolsShown, tools.tool == .text || isShapeTool { tools.tool = .select }
+                insertToolsShown.toggle()
             }
-            .disabled(doc.selection.isEmpty)
+            .help(insertToolsShown ? "收起插入工具" : "文本、形状、图片、音视频、表格、学科工具、蒙层")
         }
         .fixedSize()
     }
@@ -194,6 +212,23 @@ struct EditorToolbar: View {
     private var isShapeTool: Bool {
         if case .shape = tools.tool { return true }
         return false
+    }
+}
+
+/// 录课: into the lecture and recording at once, the outlined partner of 授课.
+struct RecordLessonButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle().fill(Color(red: 0xE5 / 255, green: 0x48 / 255, blue: 0x3B / 255)).frame(width: 9, height: 9)
+                Text("录课").font(.system(size: 14, weight: .semibold))
+            }
+        }
+        .buttonStyle(SecondaryButtonStyle(height: 30))
+        .fixedSize()
+        .help("开始授课并录屏（⌥⌘R）；录制中 ⌥⌘P 暂停，⌥⌘S 结束")
     }
 }
 

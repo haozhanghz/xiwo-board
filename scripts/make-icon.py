@@ -1,6 +1,6 @@
-# Draws the 录课 app icon: a clay squircle with a white board, a written stroke and a record dot.
+# Draws the 录课 app icon: a clay squircle with a handwritten formula, a pen and a record dot.
 import math, sys
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 S = 4  # supersampling
 N = 1024 * S
 def p(v): return int(v * S)
@@ -35,27 +35,39 @@ for y in range(N):
     gd.line([(0, y), (N, y)], fill=tuple(int(top[i] + (bot[i] - top[i]) * f) for i in range(3)) + (255,))
 img.paste(grad, (0, 0), mask)
 
-d = ImageDraw.Draw(img)
 white = (0xFA, 0xF9, 0xF5, 255)
-# Board outline.
-d.rounded_rectangle([p(212), p(282), p(772), p(670)], radius=p(58), outline=white, width=p(40))
-# Handwriting on the board: a cursive loop, like a teacher's stroke.
-def stroke(pts, w):
-    for (x, y) in pts:
-        d.ellipse([p(x - w / 2), p(y - w / 2), p(x + w / 2), p(y + w / 2)], fill=white)
-# Two lines of handwriting on the board.
-def wave(x0, x1, y, amp, waves, n=600):
-    return [(x0 + (x1 - x0) * t, y - amp * math.sin(t * 2 * math.pi * waves)) for t in (i / (n - 1) for i in range(n))]
-stroke(wave(300, 640, 418, 30, 2.5), 40)
-pts = wave(300, 520, 538, 24, 1.5)
-stroke(pts, 40)
-# Record badge over the board's lower-right corner, cut out of the board with a clay ring.
-cx, cy = 752, 650
+# Times New Roman Italic on a Mac; Liberation Serif Italic (same metrics) elsewhere.
+font = sys.argv[2] if len(sys.argv) > 2 else '/System/Library/Fonts/Supplemental/Times New Roman Italic.ttf'
+
+# The formula, written large: x²
+layer = Image.new('RGBA', (N, N), (0, 0, 0, 0))
+ld = ImageDraw.Draw(layer)
+ld.text((p(196), p(150)), 'x', font=ImageFont.truetype(font, p(400)), fill=white)
+ld.text((p(440), p(150)), '2', font=ImageFont.truetype(font, p(210)), fill=white)
+img.alpha_composite(layer)
+
+# A pen held as if writing: tip at the lower left, barrel rising to the upper right.
+pen = Image.new('RGBA', (N, N), (0, 0, 0, 0))
+pd = ImageDraw.Draw(pen)
+L, W = 420, 96            # barrel length and width, drawn horizontal with the tip on the left
+cx0, cy0 = 512, 512
+left = cx0 - L / 2
+pd.rounded_rectangle([p(left), p(cy0 - W / 2), p(cx0 + L / 2), p(cy0 + W / 2)], radius=p(26), fill=white)
+pd.polygon([(p(left + 4), p(cy0 - W / 2)), (p(left - 112), p(cy0)), (p(left + 4), p(cy0 + W / 2))], fill=white)
+pd.rectangle([p(left + 8), p(cy0 - W / 2), p(left + 34), p(cy0 + W / 2)], fill=(0xCE, 0x6C, 0x4A, 255))
+pd.polygon([(p(left - 68), p(cy0 - 18)), (p(left - 112), p(cy0)), (p(left - 68), p(cy0 + 18))], fill=(0x3A, 0x2A, 0x24, 255))
+pen = pen.rotate(40, center=(p(cx0), p(cy0)), resample=Image.BICUBIC)
+pen = pen.transform(pen.size, Image.AFFINE, (1, 0, p(-90), 0, 1, p(-60)))
+img.alpha_composite(pen)
+
+# Record badge at the lower right, set off from the pen with a clay ring.
+cx, cy = 740, 736
 ring = Image.new('L', (N, N), 0)
-ImageDraw.Draw(ring).ellipse([p(cx - 156), p(cy - 156), p(cx + 156), p(cy + 156)], fill=255)
+ImageDraw.Draw(ring).ellipse([p(cx - 150), p(cy - 150), p(cx + 150), p(cy + 150)], fill=255)
 img.paste(grad, (0, 0), Image.composite(ring, Image.new('L', (N, N), 0), mask))
-d.ellipse([p(cx - 124), p(cy - 124), p(cx + 124), p(cy + 124)], fill=white)
+d = ImageDraw.Draw(img)
+d.ellipse([p(cx - 120), p(cy - 120), p(cx + 120), p(cy + 120)], fill=white)
 red = (0xE5, 0x48, 0x3B, 255)
-d.ellipse([p(cx - 76), p(cy - 76), p(cx + 76), p(cy + 76)], fill=red)
+d.ellipse([p(cx - 74), p(cy - 74), p(cx + 74), p(cy + 74)], fill=red)
 
 img.resize((1024, 1024), Image.LANCZOS).save(sys.argv[1])
