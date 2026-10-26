@@ -241,13 +241,19 @@ final class RecordingMergerTests: XCTestCase {
         XCTAssertEqual(Self.decibels(isolated), Self.decibels(speech), accuracy: 3)
         // Line the loudness of 5 ms steps up: the best fit should be no shift at all.
         func envelope(_ v: [Int16]) -> [Double] {
-            stride(from: 0, to: v.count - 240, by: 240).map { i in v[i..<i + 240].reduce(0) { $0 + abs(Double($1)) } }
+            stride(from: 0, to: v.count - 240, by: 240).map { (i: Int) -> Double in
+                var sum = 0.0
+                for value in v[i..<i + 240] { sum += abs(Double(value)) }
+                return sum
+            }
         }
         let a = envelope(speech), b = envelope(isolated)
-        let lag = (-20...20).max { l, r in
-            func fit(_ l: Int) -> Double { (40..<(a.count - 40)).reduce(0) { $0 + a[$1] * b[$1 + l] } }
-            return fit(l) < fit(r)
-        }!
+        func fit(_ shift: Int) -> Double {
+            var sum = 0.0
+            for i in 40..<(a.count - 40) { sum += a[i] * b[i + shift] }
+            return sum
+        }
+        let lag = try XCTUnwrap(Array(-20...20).max { fit($0) < fit($1) })
         XCTAssertLessThanOrEqual(abs(lag), 2, "voice is \(lag * 5) ms out of step")
     }
 
@@ -278,7 +284,9 @@ final class RecordingMergerTests: XCTestCase {
     static func data(_ samples: [Int16]) -> Data { samples.withUnsafeBytes { Data($0) } }
     static func samples(_ data: Data) -> [Int16] { data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) } }
     static func decibels(_ samples: [Int16]) -> Double {
-        20 * log10(sqrt(samples.reduce(0) { $0 + Double($1) * Double($1) } / Double(samples.count)) / 32768 + 1e-9)
+        var sum = 0.0
+        for value in samples { sum += Double(value) * Double(value) }
+        return 20 * log10(sqrt(sum / Double(samples.count)) / 32768 + 1e-9)
     }
 
     /// A few seconds of spoken Chinese from the system voice, mono 16-bit at 48 kHz,
