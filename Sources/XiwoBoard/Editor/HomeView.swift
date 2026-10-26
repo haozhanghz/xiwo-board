@@ -48,14 +48,17 @@ struct HomeView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(recent.prefix(8).enumerated()), id: \.element) { i, url in
-                        if i > 0 { Hairline().padding(.leading, 54).padding(.trailing, 8) }
-                        RecentFileRow(url: url, modified: modified(url)) { app.open(url) }
-                            .contextMenu {
-                                Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                                Button("从列表中移除") { RecentFiles.remove(url); recent = RecentFiles.urls }
-                            }
+                let shown = Array(recent.prefix(8))
+                FluidHoverGroup(axis: .y) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(shown.enumerated()), id: \.element) { i, url in
+                            if i > 0 { RowDivider(above: shown[i - 1], below: url) }
+                            RecentFileRow(url: url, modified: modified(url)) { app.open(url) }
+                                .contextMenu {
+                                    Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                                    Button("从列表中移除") { RecentFiles.remove(url); recent = RecentFiles.urls }
+                                }
+                        }
                     }
                 }
                 .padding(4)
@@ -77,21 +80,26 @@ struct HomeView: View {
             .padding(.horizontal, 10)
             .padding(.top, 44) // clear the traffic lights
             .padding(.bottom, 20)
-            Button { app.newDocument() } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 20, height: 20)
-                        .background(Theme.accent, in: Circle())
-                    Text("新建课件").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text)
-                    Spacer(minLength: 0)
+            FluidHoverGroup(axis: .y) {
+                VStack(spacing: 2) {
+                    Button { app.newDocument() } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 20, height: 20)
+                                .background(Theme.accent, in: Circle())
+                            Text("新建课件").font(.system(size: 14)).foregroundStyle(Theme.text)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 9).frame(height: 36)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(QuietButtonStyle())
+                    .fluidHoverItem("new") { app.newDocument() }
+                    SidebarRow(title: "打开课件…", systemImage: "folder") { app.openWithPanel() }
                 }
-                .padding(.horizontal, 9).frame(height: 34)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(QuietButtonStyle())
-            SidebarRow(title: "打开课件…", systemImage: "folder") { app.openWithPanel() }
             Spacer()
             HStack {
                 Text("版本 \(Updater.shared.currentVersion)")
@@ -101,7 +109,7 @@ struct HomeView: View {
                     .foregroundStyle(Theme.secondaryText)
             }
             .font(.system(size: 12.5))
-            .foregroundStyle(Theme.tertiaryText)
+            .foregroundStyle(Theme.secondaryText)
             .padding(.horizontal, 10)
         }
         .padding(.horizontal, 10).padding(.bottom, 16)
@@ -146,7 +154,7 @@ private struct RecentFileRow: View {
                     .background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(url.deletingPathExtension().lastPathComponent)
-                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.text)
+                        .font(.system(size: 14)).foregroundStyle(Theme.text)
                         .lineLimit(1)
                     Text([url.deletingLastPathComponent().lastPathComponent, modified].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.system(size: 12.5)).foregroundStyle(Theme.secondaryText)
@@ -158,7 +166,22 @@ private struct RecentFileRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(QuietButtonStyle())
+        .fluidHoverItem(url, action: open)
         .help(url.path)
+    }
+}
+
+/// The hairline between two rows, gone while either row is lit so the highlight sits on a clean pill.
+private struct RowDivider: View {
+    let above: URL
+    let below: URL
+    @Environment(\.fluidHover) private var group
+
+    var body: some View {
+        let hidden = group?.lit == AnyHashable(above) || group?.lit == AnyHashable(below)
+        Hairline().padding(.leading, 54).padding(.trailing, 8)
+            .opacity(hidden ? 0 : 1)
+            .animation(Motion.tint, value: hidden)
     }
 }
 

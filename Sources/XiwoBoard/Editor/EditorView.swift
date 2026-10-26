@@ -157,7 +157,7 @@ struct SlideThumbnailRow: View, Equatable {
         HStack(alignment: .top, spacing: 6) {
             Text("\(index + 1)")
                 .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(selected ? Theme.text : Theme.tertiaryText)
+                .foregroundStyle(selected ? Theme.text : Theme.secondaryText)
                 .frame(width: 16, alignment: .trailing)
                 .padding(.top, 2)
             SlidePreview(slide: slide, courseware: courseware, pixelWidth: 280)

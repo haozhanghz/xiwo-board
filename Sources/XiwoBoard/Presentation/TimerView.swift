@@ -62,12 +62,8 @@ struct TimerView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .keyboardShortcut(.space, modifiers: [])
-                Button { reset() } label: {
-                    Text("重置").font(.system(size: 14)).padding(.horizontal, 14).frame(height: 30)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                Button("重置") { reset() }
+                    .buttonStyle(SecondaryButtonStyle())
             }
         }
         .padding(18)

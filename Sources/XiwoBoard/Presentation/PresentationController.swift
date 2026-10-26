@@ -470,59 +470,64 @@ struct PresentationToolbar: View {
     }
 
     private var buttons: some View {
-        HStack(spacing: 4) {
-            RibbonButton(title: "结束授课", systemImage: "xmark", tint: Color(red: 1, green: 0.45, blue: 0.42)) { presenter.end() }
-            sep
-            RibbonButton(title: "选择", systemImage: "cursorarrow", active: tools.tool == .select) { tools.tool = .select }
-            flyoutButton(.pen, title: "笔", systemImage: "pencil.tip", active: tools.tool == .pen) {
-                if tools.tool == .pen { presenter.toggleFlyout(.pen) } else { tools.tool = .pen }
-            }
-            flyoutButton(.eraser, title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser) {
-                if tools.tool == .eraser { presenter.toggleFlyout(.eraser) } else { tools.tool = .eraser }
-            }
-            RibbonButton(title: "撤消", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
-            RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
-            if !presenter.simpleToolbar {
+        RibbonRow {
+            HStack(spacing: 4) {
+                RibbonButton(title: "结束授课", systemImage: "xmark", tint: Color(red: 1, green: 0.45, blue: 0.42)) { presenter.end() }
                 sep
-                RibbonButton(title: "激光笔", systemImage: "light.max", active: tools.tool == .laser) { tools.tool = .laser }
-                RibbonButton(title: "聚光灯", systemImage: "flashlight.on.fill", active: tools.tool == .spotlight) { tools.tool = .spotlight }
-                RibbonButton(title: "放大镜", systemImage: "plus.magnifyingglass", active: tools.tool == .magnifier) { tools.tool = .magnifier }
-                RibbonButton(title: "计时器", systemImage: "timer", active: presenter.showTimer) { presenter.showTimer.toggle() }
-                RibbonButton(title: "板中板", systemImage: "rectangle.badge.plus") { presenter.insertBlankBoard() }
-                flyoutButton(.shape, title: "形状", systemImage: "square.on.circle", active: isShape) { presenter.toggleFlyout(.shape) }
+                RibbonButton(title: "选择", systemImage: "cursorarrow", active: tools.tool == .select, glides: true) { tools.tool = .select }
+                flyoutButton(.pen, title: "笔", systemImage: "pencil.tip", active: tools.tool == .pen) {
+                    if tools.tool == .pen { presenter.toggleFlyout(.pen) } else { tools.tool = .pen }
+                }
+                flyoutButton(.eraser, title: "橡皮", systemImage: "eraser", active: tools.tool == .eraser) {
+                    if tools.tool == .eraser { presenter.toggleFlyout(.eraser) } else { tools.tool = .eraser }
+                }
+                RibbonButton(title: "撤消", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
+                RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
+                if !presenter.simpleToolbar {
+                    sep
+                    RibbonButton(title: "激光笔", systemImage: "light.max", active: tools.tool == .laser, glides: true) { tools.tool = .laser }
+                    RibbonButton(title: "聚光灯", systemImage: "flashlight.on.fill", active: tools.tool == .spotlight, glides: true) { tools.tool = .spotlight }
+                    RibbonButton(title: "放大镜", systemImage: "plus.magnifyingglass", active: tools.tool == .magnifier, glides: true) { tools.tool = .magnifier }
+                    RibbonButton(title: "计时器", systemImage: "timer", active: presenter.showTimer) { presenter.showTimer.toggle() }
+                    RibbonButton(title: "板中板", systemImage: "rectangle.badge.plus") { presenter.insertBlankBoard() }
+                    flyoutButton(.shape, title: "形状", systemImage: "square.on.circle", active: isShape) { presenter.toggleFlyout(.shape) }
+                }
+                sep
+                recordButton
+                if recorder.isRecording {
+                    RibbonButton(title: recorder.isPaused ? "继续" : "暂停",
+                                 systemImage: recorder.isPaused ? "play.circle" : "pause.circle",
+                                 active: recorder.isPaused, hoverID: "pause") { presenter.togglePause() }
+                        .help(recorder.isPaused ? "继续录制（⌥⌘P）" : "暂停录制，暂停的时间不会录进视频（⌥⌘P）")
+                }
+                RibbonButton(title: "隐藏工具", systemImage: "eye.slash") { presenter.chromeVisible = false }
+                    .help("隐藏全部工具，只显示课件（H 键或右下角按钮恢复）")
+                RibbonButton(title: presenter.simpleToolbar ? "普通工具栏" : "简单工具栏",
+                             systemImage: presenter.simpleToolbar ? "rectangle.expand.vertical" : "rectangle.compress.vertical",
+                             hoverID: "toolbar-size") {
+                    presenter.simpleToolbar.toggle()
+                }
+                sep
+                RibbonButton(title: "上一页", systemImage: "chevron.left") { presenter.previous() }
+                    .disabled(doc.currentIndex == 0)
+                Button { presenter.showPages.toggle() } label: {
+                    Text("\(doc.currentIndex + 1) / \(doc.slideCount)")
+                        .font(.system(size: 15, weight: .medium).monospacedDigit())
+                        .foregroundStyle(presenter.showPages ? Theme.accent : Color.white.opacity(0.85))
+                        .frame(minWidth: 56, minHeight: 40)
+                        .background(presenter.showPages ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(QuietButtonStyle())
+                .fluidHoverItem("pages") { presenter.showPages.toggle() }
+                .help("页面列表")
+                .accessibilityLabel("页面列表，第 \(doc.currentIndex + 1) 页，共 \(doc.slideCount) 页")
+                RibbonButton(title: "下一页", systemImage: "chevron.right") { presenter.next() }
+                    .disabled(doc.currentIndex == doc.slideCount - 1)
             }
-            sep
-            recordButton
-            if recorder.isRecording {
-                RibbonButton(title: recorder.isPaused ? "继续" : "暂停",
-                             systemImage: recorder.isPaused ? "play.circle" : "pause.circle",
-                             active: recorder.isPaused) { presenter.togglePause() }
-                    .help(recorder.isPaused ? "继续录制（⌥⌘P）" : "暂停录制，暂停的时间不会录进视频（⌥⌘P）")
-            }
-            RibbonButton(title: "隐藏工具", systemImage: "eye.slash") { presenter.chromeVisible = false }
-                .help("隐藏全部工具，只显示课件（H 键或右下角按钮恢复）")
-            RibbonButton(title: presenter.simpleToolbar ? "普通工具栏" : "简单工具栏",
-                         systemImage: presenter.simpleToolbar ? "rectangle.expand.vertical" : "rectangle.compress.vertical") {
-                presenter.simpleToolbar.toggle()
-            }
-            sep
-            RibbonButton(title: "上一页", systemImage: "chevron.left") { presenter.previous() }
-                .disabled(doc.currentIndex == 0)
-            Button { presenter.showPages.toggle() } label: {
-                Text("\(doc.currentIndex + 1) / \(doc.slideCount)")
-                    .font(.system(size: 15, weight: .medium).monospacedDigit())
-                    .foregroundStyle(presenter.showPages ? Theme.accent : Color.white.opacity(0.85))
-                    .frame(minWidth: 56, minHeight: 40)
-                    .background(presenter.showPages ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .buttonStyle(QuietButtonStyle())
-            .help("页面列表")
-            .accessibilityLabel("页面列表，第 \(doc.currentIndex + 1) 页，共 \(doc.slideCount) 页")
-            RibbonButton(title: "下一页", systemImage: "chevron.right") { presenter.next() }
-                .disabled(doc.currentIndex == doc.slideCount - 1)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .fixedSize()
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .fixedSize()
+        .animation(Motion.moderate, value: tools.tool)
     }
 
     private static let space = "presentation-toolbar"
@@ -531,7 +536,9 @@ struct PresentationToolbar: View {
 
     private func flyoutButton(_ kind: PresentationController.Flyout, title: String, systemImage: String, active: Bool,
                               label: String? = nil, action: @escaping () -> Void) -> some View {
-        RibbonButton(title: title, systemImage: systemImage, active: active || presenter.flyout == kind, label: label, action: action)
+        // Only the chosen tool's pill slides; a button lit because its panel is open keeps its own.
+        RibbonButton(title: title, systemImage: systemImage, active: active || presenter.flyout == kind,
+                     glides: active && kind != .record, label: label, hoverID: "\(kind)", action: action)
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlyoutAnchorKey.self, value: [kind: g.frame(in: .named(Self.space))])
             })
