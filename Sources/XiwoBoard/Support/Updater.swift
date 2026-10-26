@@ -192,10 +192,13 @@ final class Updater: ObservableObject {
         do {
             try Self.install(staged, at: target)
             clearStaging()
-            // Reopen once this process has exited.
+            // Reopen once this process has exited. ditto keeps the zip's dates, so touch the
+            // bundle and re-register it: Finder and the Dock then drop the cached icon and name.
+            let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
             let relaunch = Process()
             relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
-            relaunch.arguments = ["-c", "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"$0\"",
+            relaunch.arguments = ["-c", "while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done; "
+                                  + "/usr/bin/touch \"$0\"; \(lsregister) -f \"$0\"; /usr/bin/open \"$0\"",
                                   target.path]
             try relaunch.run()
         } catch {
