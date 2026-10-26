@@ -559,7 +559,7 @@ struct RecordingOptions: View {
             Toggle("录制麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
             Toggle("录制电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
             Toggle("录制鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
-            Text("视频保存在「影片 › XiwoBoard 录课」。录制中点「暂停」可以暂停，暂停的时间不会录进视频；再点一次「录制」按钮即可停止。不录鼠标指针时，可以用激光笔在视频里指示。")
+            Text("视频保存在「影片 › 讲课板录课」。录制中点「暂停」可以暂停，暂停的时间不会录进视频；再点一次「录制」按钮即可停止。不录鼠标指针时，可以用激光笔在视频里指示。")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

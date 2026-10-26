@@ -13,7 +13,7 @@ public enum CoursewareArchive {
 
         public var errorDescription: String? {
             switch self {
-            case .unsupportedVersion(let version): return "课件格式版本（\(version)）暂不支持，请更新 XiwoBoard。"
+            case .unsupportedVersion(let version): return "课件格式版本（\(version)）暂不支持，请更新讲课板。"
             case .invalidDocument: return "课件内容无效：请检查页面、尺寸或表格数据。"
             }
         }

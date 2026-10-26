@@ -11,7 +11,7 @@ struct RecordingFile: Identifiable, Hashable {
     var id: URL { url }
     var name: String { url.deletingPathExtension().lastPathComponent }
 
-    /// The newest recordings in 「影片 › XiwoBoard 录课」, newest first.
+    /// The newest recordings in 「影片 › 讲课板录课」, newest first.
     static func recent(limit: Int = 8) -> [RecordingFile] {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
         guard let urls = try? FileManager.default.contentsOfDirectory(

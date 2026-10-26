@@ -8,7 +8,7 @@ struct XiwoBoardApp: App {
     @StateObject private var app = AppModel.shared
 
     var body: some Scene {
-        Window("XiwoBoard", id: "main") {
+        Window("讲课板", id: "main") {
             RootView()
                 .environmentObject(app)
                 .environmentObject(app.tools)
