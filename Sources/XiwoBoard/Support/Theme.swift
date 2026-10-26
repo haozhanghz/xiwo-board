@@ -26,11 +26,11 @@ enum Theme {
     private static let ink = dynamic(light: 0x141413, dark: 0xFAF9F5)
     static let text = dynamic(light: 0x141413, dark: 0xF5F4EF)
     static let secondaryText = dynamic(light: 0x5F5E58, dark: 0xB8B5AC)
-    static let tertiaryText = dynamic(light: 0x7E7C75, dark: 0x8F8D84)
+    static let tertiaryText = dynamic(light: 0x6E6C66, dark: 0x96948B)
     /// The one accent: primary buttons, selection, focus.
     static let accent = Color(nsAccent)
     static let nsAccent = NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0xD97757) : hex(0xC96442)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? hex(0xC4643F) : hex(0xB95A39)
     }
 
     static func nsDynamic(light: UInt32, dark: UInt32, alpha: CGFloat = 1) -> NSColor {
@@ -77,7 +77,7 @@ struct QuietButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
                 .background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .opacity(enabled ? 1 : 0.4)
+                .opacity(enabled ? 1 : 0.55)
                 .onHover { hovering = $0 }
                 .animation(.easeOut(duration: 0.12), value: hovering)
         }
@@ -122,7 +122,7 @@ private struct SecondaryButtonBody: View {
         configuration.label
             .font(.system(size: height < 32 ? 13 : 14))
             .foregroundStyle(Theme.text)
-            .opacity(enabled ? 1 : 0.4)
+            .opacity(enabled ? 1 : 0.55)
             .padding(.horizontal, height < 32 ? 10 : 12).frame(height: height)
             .background(configuration.isPressed ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))

@@ -43,19 +43,19 @@ d.rounded_rectangle([p(212), p(282), p(772), p(670)], radius=p(58), outline=whit
 def stroke(pts, w):
     for (x, y) in pts:
         d.ellipse([p(x - w / 2), p(y - w / 2), p(x + w / 2), p(y + w / 2)], fill=white)
-# A loose, hand-drawn tick: short leg down, long leg up, slightly curved.
-def bez(p0, p1, p2, n=400):
-    return [((1-t)**2*p0[0] + 2*(1-t)*t*p1[0] + t*t*p2[0], (1-t)**2*p0[1] + 2*(1-t)*t*p1[1] + t*t*p2[1])
-            for t in (i / (n - 1) for i in range(n))]
-pts = bez((330, 470), (370, 505), (418, 556)) + bez((418, 556), (500, 430), (640, 380))
-stroke(pts, 46)
+# Two lines of handwriting on the board.
+def wave(x0, x1, y, amp, waves, n=600):
+    return [(x0 + (x1 - x0) * t, y - amp * math.sin(t * 2 * math.pi * waves)) for t in (i / (n - 1) for i in range(n))]
+stroke(wave(300, 640, 418, 30, 2.5), 40)
+pts = wave(300, 520, 538, 24, 1.5)
+stroke(pts, 40)
 # Record badge over the board's lower-right corner, cut out of the board with a clay ring.
 cx, cy = 752, 650
 ring = Image.new('L', (N, N), 0)
-ImageDraw.Draw(ring).ellipse([p(cx - 150), p(cy - 150), p(cx + 150), p(cy + 150)], fill=255)
+ImageDraw.Draw(ring).ellipse([p(cx - 156), p(cy - 156), p(cx + 156), p(cy + 156)], fill=255)
 img.paste(grad, (0, 0), Image.composite(ring, Image.new('L', (N, N), 0), mask))
-d.ellipse([p(cx - 118), p(cy - 118), p(cx + 118), p(cy + 118)], fill=white)
-red = (0xC9, 0x3F, 0x2F, 255)
-d.ellipse([p(cx - 58), p(cy - 58), p(cx + 58), p(cy + 58)], fill=red)
+d.ellipse([p(cx - 124), p(cy - 124), p(cx + 124), p(cy + 124)], fill=white)
+red = (0xE5, 0x48, 0x3B, 255)
+d.ellipse([p(cx - 76), p(cy - 76), p(cx + 76), p(cy + 76)], fill=red)
 
 img.resize((1024, 1024), Image.LANCZOS).save(sys.argv[1])
