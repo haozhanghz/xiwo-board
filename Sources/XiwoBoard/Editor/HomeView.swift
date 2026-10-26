@@ -1,7 +1,8 @@
 import SwiftUI
 import XiwoCore
 
-/// Start page: recent files. New courseware starts blank; its background is picked in the inspector.
+/// Start page: recent files and recent lecture recordings. New courseware starts blank;
+/// its background is picked in the inspector.
 struct HomeView: View {
     @EnvironmentObject var app: AppModel
     @State private var recent: [URL] = RecentFiles.urls
@@ -60,6 +61,7 @@ struct HomeView: View {
                         }
                         .background(.background, in: RoundedRectangle(cornerRadius: 10))
                     }
+                    RecentRecordingsSection()
                 }
                 .padding(32)
             }
