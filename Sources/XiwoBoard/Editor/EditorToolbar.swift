@@ -42,7 +42,7 @@ struct RibbonButton: View {
                         .foregroundStyle(active ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(tint ?? labelColor))
                 }
             }
-            .frame(minWidth: density == .regular ? 44 : 32, minHeight: density == .iconOnly ? 32 : 0)
+            .frame(minWidth: density == .regular ? 48 : 34, minHeight: density == .iconOnly ? 32 : 0)
             .padding(.vertical, 4).padding(.horizontal, density == .regular ? 4 : 2)
             .foregroundStyle(active ? Theme.accent : (tint ?? Theme.text))
             .background(active ? Theme.accent.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -160,7 +160,7 @@ struct EditorToolbar: View {
     }
 
     private var toolButtons: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             RibbonButton(title: "撤销", systemImage: "arrow.uturn.backward") { doc.undo() }.disabled(!doc.canUndo)
             RibbonButton(title: "恢复", systemImage: "arrow.uturn.forward") { doc.redo() }.disabled(!doc.canRedo)
             divider
