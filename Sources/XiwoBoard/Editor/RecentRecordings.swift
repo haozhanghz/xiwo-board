@@ -10,6 +10,11 @@ struct RecordingFile: Identifiable, Hashable {
 
     var id: URL { url }
     var name: String { url.deletingPathExtension().lastPathComponent }
+    /// The name without the recording time the recorder appends; the card shows the date on its own line.
+    var title: String {
+        let trimmed = name.replacingOccurrences(of: #"\s*\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}$"#, with: "", options: .regularExpression)
+        return trimmed.isEmpty ? name : trimmed
+    }
 
     /// The newest recordings in 「影片 › 讲课板录课」, newest first.
     static func recent(limit: Int = 8) -> [RecordingFile] {
@@ -30,18 +35,19 @@ struct RecentRecordingsSection: View {
     @State private var recordings: [RecordingFile] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("最近录屏").font(.title2.bold())
-                Spacer()
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "最近录屏") {
                 Button("打开录课文件夹") { openFolder() }
             }
             if recordings.isEmpty {
-                Text("授课时点「录制」录下的视频会出现在这里，可以直接播放或分享。")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
+                Text("授课时点「录制」录下的视频会出现在这里")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(maxWidth: .infinity, minHeight: 96)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 18)], alignment: .leading, spacing: 18) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 16)], alignment: .leading, spacing: 20) {
                     ForEach(recordings) { RecordingCard(file: $0, onChange: reload) }
                 }
             }
@@ -65,11 +71,13 @@ private struct RecordingCard: View {
     @State private var poster: NSImage?
     @State private var duration: TimeInterval?
 
+    @State private var hovering = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Button { NSWorkspace.shared.open(file.url) } label: {
                 ZStack(alignment: .bottomTrailing) {
-                    Rectangle().fill(Color.black.opacity(0.85))
+                    Rectangle().fill(Color(white: 0.13))
                         .aspectRatio(16 / 9, contentMode: .fit)
                         .overlay {
                             if let poster {
@@ -77,41 +85,47 @@ private struct RecordingCard: View {
                             }
                         }
                         .overlay {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 34))
-                                .foregroundStyle(.white.opacity(0.9))
-                                .shadow(radius: 4)
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(.white)
+                                .frame(width: 38, height: 38)
+                                .background(.black.opacity(0.45), in: Circle())
+                                .opacity(hovering || poster == nil ? 1 : 0)
                         }
                     if let duration {
                         Text(LectureRecorder.format(duration))
-                            .font(.caption2.monospacedDigit())
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
-                            .padding(6)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .padding(7)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("播放")
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(file.name).font(.callout).lineLimit(2)
-                    Text("\(file.modified.formatted(date: .abbreviated, time: .shortened)) · \(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(file.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text).lineLimit(1)
+                    Text("\(file.modified.formatted(.dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN")))) · \(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondaryText).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 ShareLink(item: file.url) {
-                    Image(systemName: "square.and.arrow.up")
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 12))
+                        .foregroundStyle(Theme.secondaryText)
                 }
                 .buttonStyle(.borderless)
+                .opacity(hovering ? 1 : 0)
                 .help("分享")
                 .accessibilityLabel("分享 \(file.name)")
             }
+            .padding(.horizontal, 2)
         }
+        .onHover { hovering = $0 }
         .contextMenu {
             Button("播放") { NSWorkspace.shared.open(file.url) }
             Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }

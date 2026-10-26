@@ -186,9 +186,9 @@ final class PresentationController: NSObject, ObservableObject, NSWindowDelegate
         case .record: content = AnyView(RecordingOptions(presenter: self))
         }
         let view = content
-            .padding(14)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.15)))
+            .padding(16)
+            .presenterPanel(cornerRadius: 12)
+            .tint(Theme.accent)
             .environment(\.colorScheme, .dark)
             .environmentObject(tools)
             .environmentObject(recorder)
@@ -445,13 +445,12 @@ struct PresentationToolbar: View {
 
     private func bar(_ content: some View) -> some View {
         content
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.15)))
+            .presenterPanel()
     }
 
     private var buttons: some View {
         HStack(spacing: 4) {
-            RibbonButton(title: "结束授课", systemImage: "xmark.circle", tint: .red) { presenter.end() }
+            RibbonButton(title: "结束授课", systemImage: "xmark", tint: Color(red: 1, green: 0.45, blue: 0.42)) { presenter.end() }
             sep
             RibbonButton(title: "选择", systemImage: "cursorarrow", active: tools.tool == .select) { tools.tool = .select }
             flyoutButton(.pen, title: "笔", systemImage: "pencil.tip", active: tools.tool == .pen) {
@@ -489,12 +488,13 @@ struct PresentationToolbar: View {
             RibbonButton(title: "上一页", systemImage: "chevron.left") { presenter.previous() }
                 .disabled(doc.currentIndex == 0)
             Button { presenter.showPages.toggle() } label: {
-                Text("\(doc.currentIndex + 1)/\(doc.slideCount)")
-                    .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                    .frame(minWidth: 52, minHeight: 40)
-                    .background(presenter.showPages ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                Text("\(doc.currentIndex + 1) / \(doc.slideCount)")
+                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .foregroundStyle(presenter.showPages ? Theme.accent : Color.white.opacity(0.85))
+                    .frame(minWidth: 56, minHeight: 40)
+                    .background(presenter.showPages ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietButtonStyle())
             .help("页面列表")
             .accessibilityLabel("页面列表，第 \(doc.currentIndex + 1) 页，共 \(doc.slideCount) 页")
             RibbonButton(title: "下一页", systemImage: "chevron.right") { presenter.next() }
@@ -506,7 +506,7 @@ struct PresentationToolbar: View {
 
     private static let space = "presentation-toolbar"
 
-    private var sep: some View { Divider().frame(height: 32).padding(.horizontal, 2) }
+    private var sep: some View { Rectangle().fill(Color.white.opacity(0.1)).frame(width: 1, height: 26).padding(.horizontal, 4) }
 
     private func flyoutButton(_ kind: PresentationController.Flyout, title: String, systemImage: String, active: Bool,
                               label: String? = nil, action: @escaping () -> Void) -> some View {
@@ -536,7 +536,7 @@ struct PresentationToolbar: View {
             case .starting, .stopping: break
             }
         }
-        .foregroundStyle(recorder.isRecording ? .red : .primary)
+        .foregroundStyle(recorder.isRecording ? Color(red: 1, green: 0.45, blue: 0.42) : .primary)
         .help(recorder.isRecording ? "停止录制" : "录屏讲课")
     }
 }
@@ -553,31 +553,39 @@ struct RecordingOptions: View {
     @EnvironmentObject var recorder: LectureRecorder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("录屏讲课").font(.headline)
-            Toggle("只录课件（隐藏工具栏、计时器等功能页面）", isOn: $recorder.coursewareOnly)
-            Toggle("录制麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
-            Toggle("录制电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
-            Toggle("录制鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
-            Text("视频保存在「影片 › 讲课板录课」。录制中点「暂停」可以暂停，暂停的时间不会录进视频；再点一次「录制」按钮即可停止。不录鼠标指针时，可以用激光笔在视频里指示。")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button {
-                    presenter.closeFlyout()
-                    presenter.toggleRecording()
-                } label: {
-                    Label("开始录制", systemImage: "record.circle")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(recorder.state != .idle)
-                if let last = recorder.lastRecording {
-                    Button("打开上次录制") { NSWorkspace.shared.open(last) }
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            Text("录屏讲课").font(.system(size: 14, weight: .semibold))
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("只录课件", isOn: $recorder.coursewareOnly)
+                    .help("工具栏、计时器等面板不会录进视频，你自己仍能看到和使用")
+                Toggle("麦克风", isOn: $recorder.recordMicrophone).disabled(recorder.state != .idle)
+                Toggle("电脑声音", isOn: $recorder.recordSystemAudio).disabled(recorder.state != .idle)
+                Toggle("去掉写字声", isOn: $recorder.removeNoise)
+                    .disabled(recorder.state != .idle || !recorder.recordMicrophone || recorder.recordSystemAudio)
+                    .help("保存时去掉麦克风里的写字声等杂音（不录电脑声音时）")
+                Toggle("鼠标指针", isOn: $recorder.recordCursor).disabled(recorder.state != .idle)
+                    .help("不录鼠标指针时，可以用激光笔在视频里指示")
+            }
+            .font(.system(size: 13))
+            .toggleStyle(SettingToggleStyle())
+            Text("视频保存到「影片 › 讲课板录课」")
+                .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Button {
+                presenter.closeFlyout()
+                presenter.toggleRecording()
+            } label: {
+                Label("开始录制", systemImage: "record.circle").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .help("录制中再点一次工具栏上的「录制」按钮即可停止")
+            .disabled(recorder.state != .idle)
+            if let last = recorder.lastRecording {
+                Button("打开上次录制") { NSWorkspace.shared.open(last) }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .frame(width: 320)
+        .frame(width: 260)
     }
 }
 
@@ -606,15 +614,18 @@ struct ChromeHandle: View {
                 .accessibilityLabel(recorder.isPaused ? "继续录制" : "暂停录制")
             }
             Button { presenter.chromeVisible = true } label: {
-                Image(systemName: "wrench.and.screwdriver").font(.system(size: 15))
+                Image(systemName: "chevron.up").font(.system(size: 13, weight: .semibold))
+                    .frame(width: 22, height: 22).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("显示工具栏（H）")
+            .accessibilityLabel("显示工具栏")
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(Color(red: 0x26 / 255, green: 0x26 / 255, blue: 0x24 / 255).opacity(0.9), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.09)))
         .environment(\.colorScheme, .dark)
-        .opacity(0.75)
+        .opacity(0.9)
         .padding(4)
         .fixedSize()
     }
@@ -627,20 +638,27 @@ struct PageGrid: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("页面").font(.headline)
+                Text("页面").font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                Button(action: close) {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(QuietButtonStyle())
             }
-            .padding(12)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 14)], spacing: 14) {
                     ForEach(Array(doc.courseware.slides.enumerated()), id: \.element.id) { i, s in
                         Button { doc.go(to: i); close() } label: {
                             VStack(spacing: 4) {
                                 SlidePreview(slide: s, courseware: doc.courseware, pixelWidth: 300)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(i == doc.currentIndex ? Color.accentColor : .clear, lineWidth: 3))
-                                Text("\(i + 1)").font(.caption)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    .padding(3)
+                                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .strokeBorder(i == doc.currentIndex ? Theme.accent : .clear, lineWidth: 2))
+                                Text("\(i + 1)").font(.system(size: 11).monospacedDigit())
+                                    .foregroundStyle(i == doc.currentIndex ? Theme.accent : .secondary)
                             }
                         }
                         .buttonStyle(.plain)
@@ -649,7 +667,7 @@ struct PageGrid: View {
                 .padding(14)
             }
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .presenterPanel()
         .environment(\.colorScheme, .dark)
     }
 }

@@ -40,6 +40,8 @@ final class LiveInkView: NSView {
     private let metalLayer: CAMetalLayer
     private let frames: InkFrames
     private var tessellator: InkTessellator?
+    /// How many of the stroke's points the tessellator has: those that have settled.
+    private var settled = 0
 
     /// Nil when the Mac has no Metal device; the canvas then draws live ink itself.
     static func make() -> LiveInkView? {
@@ -121,6 +123,7 @@ final class LiveInkView: NSView {
         let pixels = scale * backing
         // A tenth of a pixel: the flattened curve cannot be told from the one Core Graphics draws.
         tessellator = InkTessellator(width: width, kind: kind, tolerance: 0.1 / Double(max(pixels, 0.01)))
+        settled = 0
         strokeSerial += 1
         let c = kind == .highlighter ? color.withAlpha(min(color.a, 0.4)) : color
         // Live ink stays inside the page, as it does when the canvas draws it.
@@ -145,17 +148,22 @@ final class LiveInkView: NSView {
         return true
     }
 
-    /// The pen moved, or pressed down: extend the stroke and get it on screen.
-    func append(_ p: StrokePoint) {
+    /// The pen moved, or pressed down: extend the stroke and get it on screen. The points
+    /// that have settled since last time join the stroke for good; the ones after them,
+    /// which the next samples can still move, are drawn as they are for now.
+    func update(_ stroke: StrokeSmoother) {
         guard tessellator != nil else { return }
-        tessellator!.append(p)
+        for p in stroke.points[settled..<stroke.stable] { tessellator!.append(p) }
+        settled = stroke.stable
         let t = tessellator!
+        let tail = t.pieces(continuingWith: Array(stroke.points[stroke.stable...]))
+        let count = stroke.points.count
         frames.update { s in
             s.pieces.removeSubrange(s.fixed...)
             for piece in t.fixed[s.fixed...] { s.pieces.append(InkPiece(piece)) }
             s.fixed = t.fixed.count
-            for piece in t.tail { s.pieces.append(InkPiece(piece)) }
-            s.points = t.points.count
+            for piece in tail { s.pieces.append(InkPiece(piece)) }
+            s.points = count
         }
     }
 

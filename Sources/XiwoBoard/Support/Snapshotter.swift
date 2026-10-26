@@ -30,8 +30,31 @@ enum Snapshotter {
 
         render(HomeView().environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1280, height: 800),
                to: dir.appendingPathComponent("home.png"))
+        // The start page with a few recent files, without touching the real recent list for long.
+        let savedRecent = UserDefaults.standard.stringArray(forKey: "recentFiles")
+        let samples = ["一年级数学 认识图形", "三年级语文 古诗两首", "拼音复习 第三单元"].map { dir.appendingPathComponent("\($0).xwb") }
+        for url in samples { try? CoursewareArchive.encode(doc.courseware).write(to: url) }
+        UserDefaults.standard.set(samples.map(\.path), forKey: "recentFiles")
+        render(HomeView().environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1280, height: 800),
+               to: dir.appendingPathComponent("home-recents.png"))
+        UserDefaults.standard.set(savedRecent, forKey: "recentFiles")
+        for url in samples { try? FileManager.default.removeItem(at: url) }
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
                to: dir.appendingPathComponent("editor.png"))
+        // With the property panel open, as when an object is being styled.
+        let inspectorWasShown = UserDefaults.standard.bool(forKey: "InspectorShown")
+        UserDefaults.standard.set(true, forKey: "InspectorShown")
+        render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
+               to: dir.appendingPathComponent("editor-inspector.png"))
+        UserDefaults.standard.set(inspectorWasShown, forKey: "InspectorShown")
+        // Dark mode, with the app's appearance switched for the moment.
+        let appearance = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        render(HomeView().environmentObject(app).environmentObject(app.tools).environment(\.colorScheme, .dark),
+               size: CGSize(width: 1280, height: 800), to: dir.appendingPathComponent("home-dark.png"))
+        render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools).environment(\.colorScheme, .dark),
+               size: CGSize(width: 1440, height: 900), to: dir.appendingPathComponent("editor-dark.png"))
+        NSApp.appearance = appearance
         // The narrowest window the app allows, and a smaller one that needs icon-only tools.
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1000, height: 640),
                to: dir.appendingPathComponent("editor-1000.png"))

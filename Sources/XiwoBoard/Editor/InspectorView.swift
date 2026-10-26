@@ -8,7 +8,7 @@ struct InspectorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 22) {
                 let sel = doc.selectedElements
                 if sel.isEmpty {
                     PageInspector(doc: doc)
@@ -16,20 +16,100 @@ struct InspectorView: View {
                     ElementInspector(doc: doc, elements: sel)
                 }
             }
-            .padding(14)
-            .frame(width: 270, alignment: .leading)
+            .padding(.horizontal, 16).padding(.vertical, 18)
+            .frame(width: 264, alignment: .leading)
         }
-        .background(.background)
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.text)
+        .controlSize(.small)
+        .toggleStyle(SettingToggleStyle())
+        .background(Theme.sidebar)
     }
 }
 
 struct InspectorSection<Content: View>: View {
     let title: String
+    /// The first section of the panel has no line above it.
+    var first = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            if !first { Hairline().padding(.bottom, 8) }
+            Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.secondaryText)
+            content()
+        }
+    }
+}
+
+/// A pop-up choice drawn like the panel's fields instead of the system pop-up button.
+struct MenuField<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(Value, String)]
+
+    var body: some View {
+        Menu {
+            Picker("", selection: $selection) {
+                ForEach(options, id: \.0) { value, title in Text(title).tag(value) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack {
+                Text(options.first { $0.0 == selection }?.1 ?? "").foregroundStyle(Theme.text).lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, 8).frame(height: 26)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+    }
+}
+
+/// Slider with its value shown at the end of the row.
+struct ValueSlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var format: (Double) -> String = { "\(Int($0.rounded()))" }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Slider(value: $value, in: range)
+            Text(format(value)).font(.system(size: 11).monospacedDigit()).foregroundStyle(Theme.secondaryText)
+                .frame(width: 34, alignment: .trailing)
+        }
+    }
+}
+
+/// A setting row: label on the left, a small switch on the right.
+struct SettingToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack {
+            configuration.label
+            Spacer(minLength: 8)
+            Toggle("", isOn: configuration.$isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+    }
+}
+
+/// A labelled row in the property panel: fixed-width caption, then the control.
+struct InspectorRow<Content: View>: View {
+    let label: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(Theme.text).frame(width: 44, alignment: .leading)
             content()
         }
     }
@@ -40,14 +120,16 @@ struct PageInspector: View {
 
     var body: some View {
         let bg = doc.slide.background
-        InspectorSection(title: "页面背景") {
+        InspectorSection(title: "页面背景", first: true) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
                 ForEach(SlideBackground.presets, id: \.name) { name, preset in
                     Button { doc.editSlide { $0.background = preset } } label: {
                         SlidePreview(slide: Slide(background: preset), courseware: doc.courseware, pixelWidth: 120)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(bg == preset ? Color.accentColor : .gray.opacity(0.3),
-                                                                              lineWidth: bg == preset ? 2 : 1))
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Theme.line))
+                            .padding(2)
+                            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(bg == preset ? Theme.accent : .clear, lineWidth: 2))
                     }
                     .buttonStyle(.plain)
                     .help(name)
@@ -55,12 +137,17 @@ struct PageInspector: View {
                     .accessibilityAddTraits(bg == preset ? .isSelected : [])
                 }
             }
-            ColorPicker("背景颜色", selection: Binding(get: { Color(nsColor: bg.color.nsColor) },
-                                                    set: { c in doc.editSlide { $0.background.color = RGBA(NSColor(c)) } }))
-            Picker("书写格", selection: Binding(get: { bg.pattern }, set: { p in doc.editSlide { $0.background.pattern = p } })) {
-                ForEach(BackgroundPattern.allCases, id: \.self) { Text($0.displayName).tag($0) }
+            InspectorRow(label: "颜色") {
+                ColorPicker("背景颜色", selection: Binding(get: { Color(nsColor: bg.color.nsColor) },
+                                                        set: { c in doc.editSlide { $0.background.color = RGBA(NSColor(c)) } }))
+                    .labelsHidden()
+                Spacer()
             }
-            HStack {
+            InspectorRow(label: "书写格") {
+                MenuField(selection: Binding(get: { bg.pattern }, set: { p in doc.editSlide { $0.background.pattern = p } }),
+                          options: BackgroundPattern.allCases.map { ($0, $0.displayName) })
+            }
+            HStack(spacing: 6) {
                 Button("背景图片…") {
                     guard let url = Exporter.chooseFiles([.image], multiple: false).first, let data = try? Data(contentsOf: url) else { return }
                     doc.edit { cw in
@@ -69,16 +156,15 @@ struct PageInspector: View {
                     }
                 }
                 if bg.image != nil { Button("移除") { doc.editSlide { $0.background.image = nil } } }
+                Button("应用到全部页面") {
+                    doc.edit { cw in for i in cw.slides.indices { cw.slides[i].background = bg } }
+                }
             }
-            Button("应用到全部页面") {
-                doc.edit { cw in for i in cw.slides.indices { cw.slides[i].background = bg } }
-            }
+            .buttonStyle(SecondaryButtonStyle(height: 26))
         }
         InspectorSection(title: "翻页动画") {
-            Picker("", selection: Binding(get: { doc.slide.transition }, set: { t in doc.editSlide { $0.transition = t } })) {
-                ForEach(SlideTransition.allCases, id: \.self) { Text($0.displayName).tag($0) }
-            }
-            .labelsHidden()
+            MenuField(selection: Binding(get: { doc.slide.transition }, set: { t in doc.editSlide { $0.transition = t } }),
+                      options: SlideTransition.allCases.map { ($0, $0.displayName) })
         }
         InspectorSection(title: "备注") {
             NotesEditor(doc: doc)
@@ -97,9 +183,12 @@ struct NotesEditor: View {
     var body: some View {
         TextEditor(text: $text)
             .focused($focused)
-            .font(.body)
+            .font(.system(size: 12))
+            .scrollContentBackground(.hidden)
+            .padding(6)
             .frame(height: 120)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.gray.opacity(0.3)))
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
             .onAppear(perform: load)
             .onChange(of: doc.slide.id) { _, _ in load() }
             .onChange(of: doc.slide.notes) { _, notes in
@@ -123,22 +212,25 @@ struct ElementInspector: View {
     var first: BoardElement { elements[0] }
 
     var body: some View {
-        InspectorSection(title: elements.count == 1 ? first.kindLabel : "\(elements.count) 个对象") {
-            if elements.count == 1 { geometry }
-            HStack {
-                Text("透明度")
-                Slider(value: Binding(get: { first.opacity }, set: { v in doc.updateSelected { $0.opacity = v } }), in: 0.1...1)
+        InspectorSection(title: elements.count == 1 ? first.kindLabel : "\(elements.count) 个对象", first: true) {
+            if elements.count == 1 {
+                geometry
+            } else {
+                InspectorRow(label: "透明度") {
+                ValueSlider(value: Binding(get: { first.opacity }, set: { v in doc.updateSelected { $0.opacity = v } }), range: 0.1...1,
+                            format: { "\(Int(($0 * 100).rounded()))%" })
+                }
             }
         }
         styleSection
         InspectorSection(title: "排列") {
-            HStack {
+            IconGroup {
                 iconButton("square.3.layers.3d.top.filled", "置于顶层") { doc.arrange(.front) }
                 iconButton("square.2.layers.3d.top.filled", "上移一层") { doc.arrange(.forward) }
                 iconButton("square.2.layers.3d.bottom.filled", "下移一层") { doc.arrange(.backward) }
                 iconButton("square.3.layers.3d.bottom.filled", "置于底层") { doc.arrange(.back) }
             }
-            HStack {
+            IconGroup {
                 iconButton("align.horizontal.left", "左对齐") { doc.align(.left) }
                 iconButton("align.horizontal.center", "水平居中") { doc.align(.hCenter) }
                 iconButton("align.horizontal.right", "右对齐") { doc.align(.right) }
@@ -146,22 +238,32 @@ struct ElementInspector: View {
                 iconButton("align.vertical.center", "垂直居中") { doc.align(.vCenter) }
                 iconButton("align.vertical.bottom", "底端对齐") { doc.align(.bottom) }
             }
-            HStack {
-                Button("组合") { doc.groupSelection() }.disabled(elements.count < 2)
-                Button("取消组合") { doc.ungroupSelection() }
+            HStack(spacing: 6) {
+                Button { doc.groupSelection() } label: { Text("组合").frame(maxWidth: .infinity) }
+                    .disabled(elements.count < 2)
+                Button { doc.ungroupSelection() } label: { Text("取消组合").frame(maxWidth: .infinity) }
                     .disabled(!elements.contains { if case .group = $0.content { return true } else { return false } })
             }
+            .buttonStyle(SecondaryButtonStyle(height: 26))
+            .font(.system(size: 12))
         }
         InspectorSection(title: "授课") {
             Toggle("锁定", isOn: flag(\.locked))
-            Toggle("蒙层（点击或擦除后显示）", isOn: flag(\.masked))
-            Toggle("克隆模式（拖动时复制）", isOn: flag(\.cloneOnDrag))
+            Toggle("蒙层", isOn: flag(\.masked)).help("授课时点击或擦除后才显示下面的内容")
+            Toggle("克隆", isOn: flag(\.cloneOnDrag)).help("授课时拖动它会复制出一个新的")
             if elements.count == 1 {
                 TextField("超链接（网址或 页面:3）", text: Binding(get: { first.hyperlink ?? "" },
                                                            set: { v in doc.update(first.id) { $0.hyperlink = v.isEmpty ? nil : v } }))
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 8).frame(height: 26)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
             }
         }
-        Button(role: .destructive) { doc.deleteSelection() } label: { Label("删除", systemImage: "trash") }
+        Button(role: .destructive) { doc.deleteSelection() } label: {
+            Label("删除", systemImage: "trash").foregroundStyle(.red)
+        }
+        .buttonStyle(.borderless)
     }
 
     private func flag(_ kp: WritableKeyPath<BoardElement, Bool>) -> Binding<Bool> {
@@ -169,13 +271,16 @@ struct ElementInspector: View {
     }
 
     private func iconButton(_ icon: String, _ help: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).frame(width: 22, height: 20) }
-            .buttonStyle(.borderless).help(help).accessibilityLabel(help)
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity, minHeight: 26).contentShape(Rectangle())
+        }
+        .buttonStyle(QuietButtonStyle(cornerRadius: 6)).help(help).accessibilityLabel(help)
     }
 
     @ViewBuilder private var geometry: some View {
         let f = first.frame
-        Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 6) {
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
             GridRow {
                 NumberField(label: "X", value: f.minX) { v in doc.update(first.id) { $0.move(dx: v - $0.frame.minX, dy: 0) } }
                 NumberField(label: "Y", value: f.minY) { v in doc.update(first.id) { $0.move(dx: 0, dy: v - $0.frame.minY) } }
@@ -194,7 +299,9 @@ struct ElementInspector: View {
             }
             GridRow {
                 NumberField(label: "旋转", value: first.rotation) { v in doc.update(first.id) { $0.rotation = v } }
-                Color.clear.frame(height: 1)
+                NumberField(label: "透明度 %", value: first.opacity * 100) { v in
+                    doc.updateSelected { $0.opacity = min(1, max(0.1, v / 100)) }
+                }
             }
         }
     }
@@ -220,10 +327,10 @@ struct ElementInspector: View {
                 ShapeStyleEditor(style: s.style) { st in
                     doc.updateSelected { e in if case .shape(var sp) = e.content { sp.style = st; e.content = .shape(sp) } }
                 }
-                Picker("类型", selection: Binding(get: { s.type }, set: { t in
-                    doc.update(first.id) { e in if case .shape(var sp) = e.content { sp.type = t; e.content = .shape(sp) } }
-                })) {
-                    ForEach(ShapeType.palette, id: \.self) { Text($0.displayName).tag($0) }
+                InspectorRow(label: "类型") {
+                    MenuField(selection: Binding(get: { s.type }, set: { t in
+                        doc.update(first.id) { e in if case .shape(var sp) = e.content { sp.type = t; e.content = .shape(sp) } }
+                    }), options: ShapeType.palette.map { ($0, $0.displayName) })
                 }
             }
         case .stroke(let st):
@@ -231,11 +338,10 @@ struct ElementInspector: View {
                 ColorSwatches(selection: Binding(get: { st.color }, set: { c in
                     doc.updateSelected { e in if case .stroke(var s) = e.content { s.color = c; e.content = .stroke(s) } }
                 }))
-                HStack {
-                    Text("粗细")
-                    Slider(value: Binding(get: { st.width }, set: { w in
+                InspectorRow(label: "粗细") {
+                    ValueSlider(value: Binding(get: { st.width }, set: { w in
                         doc.updateSelected { e in if case .stroke(var s) = e.content { s.width = w; e.content = .stroke(s) } }
-                    }), in: 1...40)
+                    }), range: 1...40)
                 }
             }
         case .table(let t):
@@ -277,16 +383,20 @@ struct NumberField: View {
     @State private var text = ""
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
+        // The caption sits inside the field, so every field in the grid lines up.
+        HStack(spacing: 6) {
+            Text(label).font(.system(size: 11)).foregroundStyle(Theme.tertiaryText).fixedSize()
             TextField("", text: $text, onCommit: {
                 if let v = Double(text), v.isFinite { commit(v) }
                 text = format(value)
             })
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 72)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12).monospacedDigit())
                 .accessibilityLabel(label)
         }
+        .padding(.horizontal, 8).frame(width: 110, height: 26)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
         .onAppear { text = format(value) }
         .onChange(of: value) { _, v in text = format(v) }
     }
@@ -300,10 +410,9 @@ struct TextStyleEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("字体", selection: binding(\.fontName)) {
-                ForEach(["PingFang SC", "Songti SC", "Kaiti SC", "Heiti SC", "Helvetica", "Times New Roman", "Menlo"], id: \.self) {
-                    Text($0).tag($0)
-                }
+            InspectorRow(label: "字体") {
+                MenuField(selection: binding(\.fontName),
+                          options: ["PingFang SC", "Songti SC", "Kaiti SC", "Heiti SC", "Helvetica", "Times New Roman", "Menlo"].map { ($0, $0) })
             }
             Stepper("字号 \(Int(spec.fontSize))", value: binding(\.fontSize), in: 8...200, step: 2)
             HStack {
@@ -332,15 +441,14 @@ struct ShapeStyleEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("线条颜色").font(.caption)
+            Text("线条颜色")
             ColorSwatches(selection: Binding(get: { style.stroke }, set: { c in var s = style; s.stroke = c; apply(s) }))
             Toggle("填充", isOn: Binding(get: { style.fill != nil }, set: { on in var s = style; s.fill = on ? style.stroke.withAlpha(0.25) : nil; apply(s) }))
             if style.fill != nil {
                 ColorSwatches(selection: Binding(get: { style.fill ?? .white }, set: { c in var s = style; s.fill = c; apply(s) }))
             }
-            HStack {
-                Text("线宽")
-                Slider(value: Binding(get: { style.lineWidth }, set: { w in var s = style; s.lineWidth = w; apply(s) }), in: 1...20)
+            InspectorRow(label: "线宽") {
+                ValueSlider(value: Binding(get: { style.lineWidth }, set: { w in var s = style; s.lineWidth = w; apply(s) }), range: 1...20)
             }
             Toggle("虚线", isOn: Binding(get: { style.dashed }, set: { d in var s = style; s.dashed = d; apply(s) }))
         }

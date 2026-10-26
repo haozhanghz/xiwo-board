@@ -10,110 +10,158 @@ struct HomeView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-            Divider()
+            Hairline(vertical: true)
             ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    HStack {
-                        Text("最近打开").font(.title2.bold())
-                        Spacer()
-                        Button("打开课件…") { app.openWithPanel() }
-                    }
-                    if recent.isEmpty {
-                        VStack(spacing: 14) {
-                            Text("还没有课件。新建一个，或打开 .xwb / .enbx 文件。")
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 12) {
-                                Button { app.newDocument() } label: { Label("新建课件", systemImage: "plus") }
-                                    .buttonStyle(.borderedProminent)
-                                Button { app.openWithPanel() } label: { Label("打开课件…", systemImage: "folder") }
-                            }
-                            .controlSize(.large)
-                            Text("背景和书写格（绿板、方格、田字格等）在编辑界面点「属性」打开面板来改。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 240)
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach(recent, id: \.self) { url in
-                                Button { app.open(url) } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: url.pathExtension.lowercased() == "enbx" ? "doc.richtext" : "rectangle.on.rectangle")
-                                            .font(.title3).frame(width: 28)
-                                            .foregroundStyle(Color.accentColor)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(url.deletingPathExtension().lastPathComponent).font(.body)
-                                            Text(url.deletingLastPathComponent().path).font(.caption).foregroundStyle(.secondary)
-                                                .lineLimit(1).truncationMode(.middle)
-                                        }
-                                        Spacer()
-                                        Text(modified(url)).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    .padding(.vertical, 8).padding(.horizontal, 12)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                                    Button("从列表中移除") { RecentFiles.remove(url); recent = RecentFiles.urls }
-                                }
-                                Divider()
-                            }
-                        }
-                        .background(.background, in: RoundedRectangle(cornerRadius: 10))
-                    }
+                VStack(alignment: .leading, spacing: 36) {
+                    Text("今天讲什么课？")
+                        .font(.system(size: 30, weight: .regular, design: .serif))
+                        .foregroundStyle(Theme.text)
+                        .padding(.top, 8)
+                    recentSection
                     RecentRecordingsSection()
                 }
-                .padding(32)
+                .frame(maxWidth: 860, alignment: .leading)
+                .padding(.horizontal, 48).padding(.top, 48).padding(.bottom, 40)
+                .frame(maxWidth: .infinity)
             }
+            .background(Theme.background)
         }
+        .tint(Theme.accent)
         .onAppear { recent = RecentFiles.urls }
     }
 
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "最近打开") {
+                if !recent.isEmpty { Button("打开其他课件…") { app.openWithPanel() } }
+            }
+            if recent.isEmpty {
+                VStack(spacing: 12) {
+                    Text("打开过的课件会出现在这里，也可以打开 .enbx 课件")
+                        .font(.system(size: 12)).foregroundStyle(Theme.secondaryText)
+                    Button { app.openWithPanel() } label: { Text("打开课件…") }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                .frame(maxWidth: .infinity, minHeight: 110)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(recent.prefix(8).enumerated()), id: \.element) { i, url in
+                        if i > 0 { Hairline().padding(.leading, 54).padding(.trailing, 8) }
+                        RecentFileRow(url: url, modified: modified(url)) { app.open(url) }
+                            .contextMenu {
+                                Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                                Button("从列表中移除") { RecentFiles.remove(url); recent = RecentFiles.urls }
+                            }
+                    }
+                }
+                .padding(4)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+            }
+        }
+    }
+
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 10) {
                 // The app icon itself, so the home page always matches the Dock.
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
-                    .frame(width: 52, height: 52)
-                VStack(alignment: .leading) {
-                    Text("讲课板").font(.headline)
-                    Text("课堂白板").font(.caption).foregroundStyle(.secondary)
-                }
+                    .frame(width: 30, height: 30)
+                Text("讲课板").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
             }
-            .padding(.bottom, 12)
+            .padding(.horizontal, 10)
+            .padding(.top, 44) // clear the traffic lights
+            .padding(.bottom, 20)
             Button { app.newDocument() } label: {
-                Label("新建课件", systemImage: "plus.rectangle.on.rectangle").frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 10) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(Theme.accent, in: Circle())
+                    Text("新建课件").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 9).frame(height: 34)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.borderedProminent).controlSize(.large)
-            Button { app.openWithPanel() } label: {
-                Label("打开课件", systemImage: "folder").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .controlSize(.large)
-            Button {
+            .buttonStyle(QuietButtonStyle())
+            SidebarRow(title: "打开课件…", systemImage: "folder") { app.openWithPanel() }
+            SidebarRow(title: "示例课件", systemImage: "sparkles") {
                 if app.confirmClose() { app.document = DocumentModel(courseware: SampleCourseware.make()) }
-            } label: {
-                Label("示例课件", systemImage: "sparkles.rectangle.stack").frame(maxWidth: .infinity, alignment: .leading)
             }
-            .controlSize(.large)
             Spacer()
-            Text("支持打开 .enbx 课件，\n授课时可原生录制屏幕与麦克风。")
-                .font(.caption).foregroundStyle(.secondary)
             HStack {
-                Text("版本 \(Updater.shared.currentVersion)").font(.caption).foregroundStyle(.secondary)
+                Text("版本 \(Updater.shared.currentVersion)")
                 Spacer()
                 Button("检查更新") { UpdateWindow.checkNow() }
-                    .buttonStyle(.link).font(.caption)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondaryText)
             }
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.tertiaryText)
+            .padding(.horizontal, 10)
         }
-        .padding(20)
-        .frame(width: 220)
-        .background(.bar)
+        .padding(.horizontal, 10).padding(.bottom, 16)
+        .frame(width: 232)
+        .background(Theme.sidebar)
     }
 
     private func modified(_ url: URL) -> String {
         guard let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return "" }
-        return d.formatted(date: .abbreviated, time: .shortened)
+        return d.formatted(.dateTime.month().day().hour().minute().locale(Locale(identifier: "zh_CN")))
+    }
+}
+
+/// Section title with an optional quiet action on the right.
+struct SectionHeader<Trailing: View>: View {
+    let title: String
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.secondaryText)
+            Spacer()
+            trailing()
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondaryText)
+        }
+        .padding(.horizontal, 4)
+    }
+}
+
+private struct RecentFileRow: View {
+    let url: URL
+    let modified: String
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 12) {
+                Image(systemName: url.pathExtension.lowercased() == "enbx" ? "doc.richtext" : "rectangle.on.rectangle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.hover, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(url.deletingPathExtension().lastPathComponent)
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Text([url.deletingLastPathComponent().lastPathComponent, modified].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 16)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(QuietButtonStyle())
+        .help(url.path)
     }
 }
 

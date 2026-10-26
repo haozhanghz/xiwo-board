@@ -213,6 +213,65 @@ final class RecordingMergerTests: XCTestCase {
         XCTAssertLessThan(RecordingMerger.Leveler.raise(20_000, by: 1.5), RecordingMerger.Leveler.raise(25_000, by: 1.5))
     }
 
+    /// The pen tapping on the tablet between sentences is taken out of the microphone.
+    func testVoiceIsolationTakesOutPenTaps() throws {
+        let isolator = try RecordingMerger.VoiceIsolator()
+        var taps = [Int16](repeating: 0, count: 96_000)
+        var random = SystemRandomNumberGenerator()
+        for start in stride(from: 4_800, to: 90_000, by: 13_000) {
+            for i in 0..<720 { taps[start + i] = Int16(9_000 * exp(-Double(i) / 120) * Double.random(in: -1...1, using: &random)) }
+        }
+        var out = try isolator.process(Self.data(taps))
+        out.append(try isolator.finish())
+        XCTAssertEqual(out.count, taps.count * 2)
+        XCTAssertLessThan(Self.decibels(Self.samples(out)), Self.decibels(taps) - 30)
+    }
+
+    /// The isolated voice keeps its loudness and stays in step with the picture.
+    func testIsolatedVoiceStaysInStep() throws {
+        let speech = try Self.speech()
+        let isolator = try RecordingMerger.VoiceIsolator()
+        var out = Data()
+        for start in stride(from: 0, to: speech.count, by: 4_096) {
+            out.append(try isolator.process(Self.data(Array(speech[start..<min(speech.count, start + 4_096)]))))
+        }
+        out.append(try isolator.finish())
+        let isolated = Self.samples(out)
+        XCTAssertEqual(isolated.count, speech.count)
+        XCTAssertEqual(Self.decibels(isolated), Self.decibels(speech), accuracy: 3)
+        // Line the loudness of 5 ms steps up: the best fit should be no shift at all.
+        func envelope(_ v: [Int16]) -> [Double] {
+            stride(from: 0, to: v.count - 240, by: 240).map { (i: Int) -> Double in
+                var sum = 0.0
+                for value in v[i..<i + 240] { sum += abs(Double(value)) }
+                return sum
+            }
+        }
+        let a = envelope(speech), b = envelope(isolated)
+        func fit(_ shift: Int) -> Double {
+            var sum = 0.0
+            for i in 40..<(a.count - 40) { sum += a[i] * b[i + shift] }
+            return sum
+        }
+        let lag = try XCTUnwrap(Array(-20...20).max { fit($0) < fit($1) })
+        XCTAssertLessThanOrEqual(abs(lag), 2, "voice is \(lag * 5) ms out of step")
+    }
+
+    /// A microphone track is cleaned up even when it is loud enough, and comes out mono.
+    func testLevelIsolatesVoiceTrack() async throws {
+        let part = dir.appendingPathComponent("voice.mp4")
+        try await Self.writePart(to: part, seconds: 1, color: Pixel(r: 30, g: 30, b: 220), loud: true, soundTracks: 1)
+        let cleaned = dir.appendingPathComponent("cleaned.mp4")
+        let changed = try await RecordingMerger.level(part, into: cleaned, voiceTracks: [0])
+        XCTAssertTrue(changed)
+        let asset = AVURLAsset(url: cleaned)
+        let duration = try await asset.load(.duration)
+        XCTAssertEqual(duration.seconds, 1, accuracy: 0.05)
+        let sound = try await asset.loadTracks(withMediaType: .audio)
+        let format = try await sound[0].load(.formatDescriptions).first
+        XCTAssertEqual(format.flatMap { CMAudioFormatDescriptionGetStreamBasicDescription($0)?.pointee.mChannelsPerFrame }, 1)
+    }
+
     func testRefusesNothingToJoin() async {
         do {
             try await RecordingMerger.merge([], into: dir.appendingPathComponent("none.mp4"))
@@ -221,6 +280,31 @@ final class RecordingMergerTests: XCTestCase {
     }
 
     // MARK: Helpers
+
+    static func data(_ samples: [Int16]) -> Data { samples.withUnsafeBytes { Data($0) } }
+    static func samples(_ data: Data) -> [Int16] { data.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) } }
+    static func decibels(_ samples: [Int16]) -> Double {
+        var sum = 0.0
+        for value in samples { sum += Double(value) * Double(value) }
+        return 20 * log10(sqrt(sum / Double(samples.count)) / 32768 + 1e-9)
+    }
+
+    /// A few seconds of spoken Chinese from the system voice, mono 16-bit at 48 kHz,
+    /// after a second of silence.
+    static func speech() throws -> [Int16] {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("speech-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let say = Process()
+        say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        say.arguments = ["-v", "Tingting", "同学们好，请看黑板上的三角形，它有三条边和三个角。", "-o", url.path, "--data-format=LEI16@48000"]
+        try say.run()
+        say.waitUntilExit()
+        guard say.terminationStatus == 0 else { throw XCTSkip("no system voice to speak with") }
+        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatInt16, interleaved: true)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+        try file.read(into: buffer)
+        return [Int16](repeating: 0, count: 48_000) + Array(UnsafeBufferPointer(start: buffer.int16ChannelData![0], count: Int(buffer.frameLength)))
+    }
 
     struct Pixel: CustomStringConvertible {
         var r, g, b: Int

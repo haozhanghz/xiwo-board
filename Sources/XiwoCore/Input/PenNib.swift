@@ -10,18 +10,22 @@ import Foundation
 /// point's `widthScale`. Speeds are taken on screen, in view points, so the line looks
 /// the same at any zoom; times are `NSEvent` timestamps, in seconds.
 ///
-/// The width follows a smoothed speed and is smoothed once more itself, so it swells and
-/// thins over a few samples instead of with the jitter between two of them. Whether a
-/// stroke ends in a point is only known when the pen lifts, so `taper` narrows the end
-/// then, on the points already written.
+/// The speed is the distance the pen covered over the last `speedWindow` milliseconds, not
+/// from one sample to the next, which a tablet's jitter adds to; it is smoothed, and the
+/// width smoothed once more, so the line swells and thins gradually instead of with every
+/// wobble. The range is kept narrow enough that a line written at an even pace looks even.
+/// Whether a stroke ends in a point is only known when the pen lifts, so `taper` narrows
+/// the end then, on the points already written.
 public struct PenNib: Sendable {
     /// Width with the pen at rest, and at `fastSpeed` and faster.
-    static let slowScale = 1.18, fastScale = 0.72
+    static let slowScale = 1.1, fastScale = 0.8
     /// View points per millisecond: the line starts to thin above `slowSpeed` and is
     /// thinnest from `fastSpeed` on.
     static let slowSpeed = 0.05, fastSpeed = 1.0
+    /// Milliseconds over which the pen's speed is measured.
+    static let speedWindow = 20.0
     /// Milliseconds the measured speed, and then the width, take to follow the pen.
-    static let speedTime = 18.0, widthTime = 10.0
+    static let speedTime = 18.0, widthTime = 20.0
     /// The end tapers when the pen covered more than `liftSpeed` view points per
     /// millisecond over its last `liftWindow` milliseconds: over the distance `taperTime`
     /// milliseconds of the speed beyond that would cover, at most `taperWidths` pen widths,
@@ -52,14 +56,19 @@ public struct PenNib: Sendable {
         var dt = 0.0
         if let last = recent.last {
             dt = max(0.5, ms - last.time)
-            let v = hypot(p.x - last.point.x, p.y - last.point.y) * scale / dt
+            // From the oldest sample in the window, or the last one when the pen reports
+            // less often than that.
+            let from = recent.first { ms - $0.time <= Self.speedWindow } ?? last
+            let v = hypot(p.x - from.point.x, p.y - from.point.y) * scale / max(0.5, ms - from.time)
             speed += (v - speed) * (1 - exp(-dt / Self.speedTime))
         }
         recent.append((p, ms))
         if recent.count > 16 { recent.removeFirst() }
-        var target = Self.slowScale + (Self.fastScale - Self.slowScale) * smoothstep(Self.slowSpeed, Self.fastSpeed, speed)
-        if let pressure { target *= 0.7 + 0.6 * min(1, max(0, pressure)) }
-        let w = current.map { $0 + (target - $0) * (1 - exp(-dt / Self.widthTime)) } ?? target
+        let press = pressure.map { 0.7 + 0.6 * min(1, max(0, $0)) } ?? 1
+        let target = (Self.slowScale + (Self.fastScale - Self.slowScale) * smoothstep(Self.slowSpeed, Self.fastSpeed, speed)) * press
+        // The pen lands at its plain width and fills out only if it stays, so strokes do
+        // not all start with a blot.
+        let w = current.map { $0 + (target - $0) * (1 - exp(-dt / Self.widthTime)) } ?? press
         current = w
         return Self.rounded(w)
     }
