@@ -410,10 +410,15 @@ final class LectureRecorder: NSObject, ObservableObject {
         return first.deletingLastPathComponent().appendingPathComponent("\(name) 片段\(number).\(first.pathExtension)")
     }
 
-    static func makeOutputURL(title: String) -> URL {
+    /// 「影片 › XiwoBoard 录课」, where every lecture is saved.
+    nonisolated static var recordingsDirectory: URL {
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = movies.appendingPathComponent("XiwoBoard 录课", isDirectory: true)
+        return movies.appendingPathComponent("XiwoBoard 录课", isDirectory: true)
+    }
+
+    static func makeOutputURL(title: String) -> URL {
+        let dir = recordingsDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
