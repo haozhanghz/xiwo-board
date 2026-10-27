@@ -47,6 +47,12 @@ enum Snapshotter {
         for url in samples { try? FileManager.default.removeItem(at: url) }
         render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
                to: dir.appendingPathComponent("editor.png"))
+        // A text box chosen: the format bar has its font size next to the colours.
+        let chosen = doc.selection
+        doc.selection = [doc.slide.elements[0].id]
+        render(EditorView(doc: doc).environmentObject(app).environmentObject(app.tools), size: CGSize(width: 1440, height: 900),
+               to: dir.appendingPathComponent("editor-format-text.png"))
+        doc.selection = chosen
         // With the property panel open, as when an object is being styled.
         let inspectorWasShown = UserDefaults.standard.bool(forKey: "InspectorShown")
         UserDefaults.standard.set(true, forKey: "InspectorShown")
