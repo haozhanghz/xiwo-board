@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import QuartzCore
+import SwiftUI
 import XiwoCore
 
 /// The drawing surface used by both the editor and the presenter.
@@ -83,6 +84,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
     private var editor: NSTextView?
     private var editingID: String?
     private var editingCell: (row: Int, col: Int)?
+    /// Colour, fill and font size of the chosen elements, in a bar beside them in the editor.
+    private var formatBar: FormatBarHost?
 
     init(document: DocumentModel, tools: ToolState, mode: Mode) {
         self.document = document
@@ -104,6 +107,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
                 if self.tools.tool != .text { self.endEditing() }
                 self.window?.invalidateCursorRects(for: self)
                 self.needsDisplay = true
+                self.updateFormatBar()
             }
         }.store(in: &cancellables)
         TabletInput.shared.start()
@@ -133,11 +137,17 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         }
         settledAfterInk = nil
         needsDisplay = true
+        updateFormatBar()
     }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateFormatBar()
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -455,6 +465,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             selectDown(at: p, event: event)
         }
         needsDisplay = true
+        updateFormatBar()
     }
 
     private func selectDown(at p: CGPoint, event: NSEvent) {
@@ -561,6 +572,8 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
                 }
             }
             drag = .moving(last: p, moved: true)
+            // Out of the way while the selection moves; back where it lands.
+            if !moved { updateFormatBar() }
         case .cloning(let id, let last):
             document.editSlideLive { s in
                 if let i = s.elements.firstIndex(where: { $0.id == id }) { s.elements[i].move(dx: p.x - last.x, dy: p.y - last.y) }
@@ -625,6 +638,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         drag = .none
         liveStroke = nil
         needsDisplay = true
+        updateFormatBar()
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -682,6 +696,13 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         case 124: nudge(step, 0)
         case 125: nudge(0, step)
         case 126: nudge(0, -step)
+        case 36, 76:
+            // Return types into the chosen text box or shape, as a double click does.
+            guard document.selection.count == 1, let e = document.selectedElements.first else { return super.keyDown(with: event) }
+            switch e.content {
+            case .text, .shape: beginEditing(e.id)
+            default: super.keyDown(with: event)
+            }
         case 53: document.selection = []; tools.tool = .select
         default: super.keyDown(with: event)
         }
@@ -928,6 +949,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         editor = tv
         document.commitPendingEditing = { [weak self] in self?.endEditing() }
         invalidateCache()
+        updateFormatBar()
     }
 
     func endEditing() {
@@ -944,6 +966,7 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         case .text(var t):
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 document.editSlide { $0.elements.removeAll { $0.id == id } }
+                document.selection.remove(id)
             } else if text != t.text {
                 t.text = text
                 document.update(id) { $0.content = .text(t); $0.refitText(was: e) }
@@ -962,6 +985,10 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         }
         invalidateCache()
         window?.makeFirstResponder(self)
+        // A text box is placed once, as a shape is: back to 选择 with the box still chosen, so
+        // its handles and the format bar are there to move, size and restyle it.
+        if mode == .edit, tools.tool == .text { tools.tool = .select }
+        updateFormatBar()
     }
 
     func textDidEndEditing(_ notification: Notification) { endEditing() }
@@ -977,6 +1004,65 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
             lm.ensureLayout(for: tc)
             let h = lm.usedRect(for: tc).height + 8
             if h > tv.frame.height { tv.frame.size.height = h }
+        }
+    }
+
+    // MARK: Format bar
+
+    /// Something is being moved, sized, turned or boxed in. A click that has not moved yet is not.
+    private var isDragging: Bool {
+        switch drag {
+        case .none: false
+        case .moving(_, let moved): moved
+        default: true
+        }
+    }
+
+    /// Shows the format bar under the selection, or above it when there is no room below, while
+    /// choosing with 选择 and nothing is being dragged or typed; hides it otherwise.
+    private func updateFormatBar() {
+        guard mode == .edit, tools.tool == .select, editingID == nil, !isDragging,
+              let state = FormatBarState(document.selectedElements),
+              let chosen = BoardElement.union(document.selectedElements) else {
+            formatBar?.isHidden = true
+            return
+        }
+        let bar: FormatBarHost
+        if let formatBar {
+            bar = formatBar
+            if bar.rootView.state != state { bar.rootView = makeFormatBar(state) }
+        } else {
+            bar = FormatBarHost(rootView: makeFormatBar(state))
+            addSubview(bar)
+            formatBar = bar
+        }
+        if bar.isHidden {
+            // Fades in where the selection settles; hiding is at once, so it never trails a drag.
+            bar.alphaValue = 0
+            bar.isHidden = false
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.12; bar.animator().alphaValue = 1 }
+        }
+        let size = bar.fittingSize
+        let room = FormatBar.shadowRoom, margin: CGFloat = 8
+        let r = toView(chosen)
+        // Clear of the handles below, and of the rotation knob above a single element.
+        let below = r.maxY + 14, above = r.minY - (document.selection.count == 1 ? 42 : 14) - (size.height - 2 * room)
+        var y = below
+        if below + size.height - 2 * room > bounds.maxY - margin {
+            y = above >= bounds.minY + margin ? above : bounds.maxY - margin - (size.height - 2 * room)
+        }
+        let x = min(max(r.midX - size.width / 2, bounds.minX + margin - room), bounds.maxX - margin + room - size.width)
+        bar.frame = NSRect(x: x, y: y - room, width: size.width, height: size.height)
+    }
+
+    private func makeFormatBar(_ state: FormatBarState) -> FormatBar {
+        FormatBar(state: state) { [weak self] change in
+            guard let self else { return }
+            let chosen = document.selectedElements
+            document.updateSelected { $0.apply(change) }
+            tools.remember(change, from: chosen)
+            // Keys such as Delete and the arrows keep working on the selection.
+            window?.makeFirstResponder(self)
         }
     }
 
@@ -1038,6 +1124,15 @@ final class BoardCanvasView: NSView, NSTextViewDelegate {
         guard let img = SlideRenderer.image(of: Slide(background: SlideBackground(color: .clear), elements: moved), courseware: cw,
                                             pixelWidth: Int(u.width * 2)) else { return }
         Exporter.savePNG(img, suggestedName: "导出的图片")
+    }
+}
+
+/// Hosts the format bar, letting clicks on the margin left for its shadow through to the canvas.
+final class FormatBarHost: NSHostingView<FormatBar> {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let room = FormatBar.shadowRoom
+        guard bounds.insetBy(dx: room, dy: room).contains(convert(point, from: superview)) else { return nil }
+        return super.hitTest(point)
     }
 }
 

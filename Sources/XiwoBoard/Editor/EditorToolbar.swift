@@ -431,6 +431,8 @@ struct PenSettings: View {
 struct ColorSwatches: View {
     @Binding var selection: RGBA
     var palette: [RGBA] = RGBA.penPalette
+    /// Ends the row with a rainbow dot that opens the system colour panel for any other colour.
+    var custom = true
     @Namespace private var ring
 
     var body: some View {
@@ -450,26 +452,30 @@ struct ColorSwatches: View {
                 .accessibilityAddTraits(selection == c ? .isSelected : [])
             }
             // Any other colour: a rainbow dot that opens the system colour panel.
-            ZStack {
-                Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
-                    .frame(width: 18, height: 18)
-                    .overlay(Circle().fill(Color(nsColor: selection.nsColor)).frame(width: 9, height: 9))
-                    .padding(2)
-                    .overlay {
-                        if !RGBA.penPalette.contains(selection) && !palette.contains(selection) { SelectionRing(namespace: ring) }
-                    }
-                    .allowsHitTesting(false)
-                ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
-                                                   set: { selection = RGBA(NSColor($0)) }))
-                    .labelsHidden()
-                    .opacity(0.02)
-                    .frame(width: 22, height: 22)
-                    .clipShape(Circle())
-            }
-            .frame(minWidth: 24, minHeight: 24)
-            .help("自定义颜色")
+            if custom { customColor }
         }
         .animation(Motion.moderate, value: selection)
+    }
+
+    private var customColor: some View {
+        ZStack {
+            Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+                .frame(width: 18, height: 18)
+                .overlay(Circle().fill(Color(nsColor: selection.nsColor)).frame(width: 9, height: 9))
+                .padding(2)
+                .overlay {
+                    if !RGBA.penPalette.contains(selection) && !palette.contains(selection) { SelectionRing(namespace: ring) }
+                }
+                .allowsHitTesting(false)
+            ColorPicker("自定义颜色", selection: Binding(get: { Color(nsColor: selection.nsColor) },
+                                               set: { selection = RGBA(NSColor($0)) }))
+                .labelsHidden()
+                .opacity(0.02)
+                .frame(width: 22, height: 22)
+                .clipShape(Circle())
+        }
+        .frame(minWidth: 24, minHeight: 24)
+        .help("自定义颜色")
     }
 
     private func colorName(_ color: RGBA) -> String {
